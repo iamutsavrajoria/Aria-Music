@@ -28,6 +28,7 @@ tasks.register("checkModuleGraph") {
             p.path to p.configurations
                 .flatMap { it.dependencies.withType(org.gradle.api.artifacts.ProjectDependency::class.java) }
                 .map { it.path }
+                .filter { it != p.path } // AGP adds self-dependencies to some configurations; they are harmless
                 .toSet()
         }
         val violations = ModuleGraphRules.violations(graph)
