@@ -1,0 +1,10 @@
+# SPDX-License-Identifier: GPL-3.0-only
+.gradle/
+build/
+local.properties
+*.keystore
+*.jks
+.idea/
+captures/
+.cxx/
+.internal/stress-tests/
