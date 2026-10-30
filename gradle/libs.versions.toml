@@ -15,6 +15,7 @@ media3 = "1.10.1"
 mediarouter = "1.8.1"
 castFramework = "22.3.1"
 room = "2.8.4"
+coroutines = "1.11.0"
 hilt = "2.60.1"
 ktor = "3.5.2"
 ksp = "2.3.11"
@@ -85,6 +86,10 @@ cast-framework = { module = "com.google.android.gms:play-services-cast-framework
 
 room-runtime = { module = "androidx.room:room-runtime", version.ref = "room" }
 room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
+room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
+room-testing = { module = "androidx.room:room-testing", version.ref = "room" }
+
+coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 
 hilt = { module = "com.google.dagger:hilt-android", version.ref = "hilt" }
 hilt-compiler = { module = "com.google.dagger:hilt-android-compiler", version.ref = "hilt" }

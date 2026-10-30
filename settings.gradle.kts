@@ -37,3 +37,4 @@ rootProject.name = "Aria"
 // Each task that creates a module adds its own include(...) line in the same commit.
 include(":core")
 include(":domain")
+include(":data")
