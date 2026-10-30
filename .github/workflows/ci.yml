@@ -12,10 +12,11 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 21 }
       - uses: gradle/actions/setup-gradle@v4
-      - run: ./gradlew -p buildSrc test
       - name: No destructive migration
         run: scripts/check-no-destructive-migration.sh
+      - name: Build-logic tests
+        run: scripts/ci-gradle.sh -p buildSrc test
       - name: Module graph
-        run: |
-          ./gradlew checkModuleGraph --console=plain > /tmp/mg.log 2>&1 || { echo "::error title=checkModuleGraph::$(tail -c 1500 /tmp/mg.log | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')"; exit 1; }
-      - run: ./gradlew build test
+        run: scripts/ci-gradle.sh checkModuleGraph
+      - name: Build and test
+        run: scripts/ci-gradle.sh build test

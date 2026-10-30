@@ -13,7 +13,13 @@ android {
         targetCompatibility = JavaVersion.VERSION_21
     }
     testOptions { unitTests.isIncludeAndroidResources = true }
-    sourceSets.getByName("test").assets.srcDir("$projectDir/schemas")
+}
+
+// Room schema JSON is read by the migration test as an asset (AGP 9 variant API; the old sourceSets DSL is gone).
+androidComponents {
+    onVariants { variant ->
+        variant.unitTest?.sources?.assets?.addStaticSources(listOf(layout.projectDirectory.dir("schemas")))
+    }
 }
 
 kotlin { jvmToolchain(21) }
