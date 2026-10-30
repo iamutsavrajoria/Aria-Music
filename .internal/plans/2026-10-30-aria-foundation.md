@@ -8,7 +8,11 @@
 
 **Tech Stack:** Kotlin 2.4.10, AGP 9.3.1, Gradle 9.7.0, JVM 21, Compose 1.12.0, Media3 1.10.1, Room 2.8.4, Hilt 2.60.1, Ktor 3.5.2, Coil 3.6.0, Tink (Ed25519), Robolectric 4.16.1. Versions are copied from Meld's `gradle/libs.versions.toml` at commit `fe9a666227ff3d6667075e65a4330518a724524b`, the only combination known to build together.
 
-**Verification caveat (read first):** the sandbox this plan was written in cannot reach Maven, Google's repository, JitPack or the Gradle plugin portal, so **none of the Gradle snippets or Kotlin below has been compiled.** The pure-Kotlin logic (TrackId, registry verifier, glass resolver, crash formatter, module-graph rules, provenance script) is written test-first so each task's tests are the check. Every task's "Run" step must be executed on CI or a machine with network access. If a command's expected output differs, fix the code, not the expectation, and note it in the commit message.
+**Verification caveat (read first):** the sandbox this plan was written in cannot reach Maven, Google's repository, JitPack or the Gradle plugin portal, and its GitHub token is invalid, so **none of the Gradle snippets or Kotlin below has been compiled.** The pure-Kotlin logic (TrackId, registry verifier, glass resolver, crash formatter, module-graph rules, provenance script) is written test-first so each task's tests are the check. The "Expected" lines in each task are predictions until a build has run.
+
+**Prerequisite (blocks execution):** a GitHub repository for Aria, created by the maintainer, with this session given push access (link GitHub in claude.ai settings, or provide `owner/repo` so it can be attached with push access). Until it exists, the local repo in the working directory is the only copy and can be lost with the session.
+
+**Definition of done for every task (stress-test branch 1):** a task is done only when **CI is green for its commit** on the remote. The workflow run URL and result are pasted into the task's final commit message or PR. If CI is red, the task stays open. If a command's output differs from "Expected", fix the code, not the expectation, and say so in the commit message.
 
 ## Global Constraints
 
@@ -20,6 +24,7 @@ Copied from the spec; every task includes these.
 - No Firebase, no analytics, no crash-reporting service in either flavor. No ads. Updates are notify-only.
 - `:playback` depends only on `:domain` interfaces (plus DSP modules later); never on a provider module or `:data`. UI never knows which source a track came from.
 - Track IDs are built and read only through `TrackId`: bare string for YouTube, prefixed for every other source.
+- Module creation: the task that creates a module (`:data` in Task 4, `:designsystem` 7, `:innertube` 8, `:playback` 9, `:app` 10) also adds `include(":<module>")` to `settings.gradle.kts` in the same commit.
 - Room: fresh schema at version 1, `exportSchema = true`, schema JSON committed, no legacy migrations, **no destructive-migration fallback in release builds**. Secrets (Spotify tokens, cookies) are never stored in Room.
 - Every ported file keeps its original header; every ported or new file carries `SPDX-License-Identifier: GPL-3.0-only`. Both sources say "GPL-3.0" without "or later".
 - Every ported directory has a row in `docs/provenance.csv`; the upstream license is audited before porting; unknown or incompatible code is not ported.
@@ -34,7 +39,7 @@ Copied from the spec; every task includes these.
 ```
 aria.properties                      # name + package ID, single source
 settings.gradle.kts  build.gradle.kts  gradle/libs.versions.toml
-build-logic/convention/              # precompiled script plugins + ModuleGraphRules
+buildSrc/                            # ModuleGraphRules + its tests (added in Task 3)
 domain/        pure Kotlin           TrackId, Track, SearchSource, StreamSource, PlayEventRepository, LyricsProvider
 core/          Android lib           registry/ (signed registry verification), crash/ (report formatting)
 data/          Android lib           AriaDatabase (Room v1), entities, DAOs, PlayEventRepositoryImpl
@@ -88,11 +93,11 @@ git commit -m "docs(spike): record InnerTubeX license, store policy and PoToken 
 ### Task 1: Repository scaffold and single-source config
 
 **Files:**
-- Create: `aria.properties`, `settings.gradle.kts`, `build.gradle.kts`, `gradle/libs.versions.toml`, `build-logic/settings.gradle.kts`, `build-logic/convention/build.gradle.kts`, `build-logic/convention/src/main/kotlin/aria.android-library.gradle.kts`, `build-logic/convention/src/main/kotlin/aria.kotlin-library.gradle.kts`, `.gitignore`, `LICENSE`, `README.md`, `CREDITS.md`
+- Create: `aria.properties`, `settings.gradle.kts`, `build.gradle.kts`, `gradle/libs.versions.toml`, `.gitignore`, `LICENSE`, `README.md`, `CREDITS.md`
 - Copy: `gradlew`, `gradlew.bat`, `gradle/wrapper/*` from Meld
 
 **Interfaces:**
-- Produces: plugin IDs `aria.android-library` and `aria.kotlin-library`; property keys `app.name`, `app.id` read by `:app`; version catalog `libs`.
+- Produces: the explicit per-module build-file template (Step 5); property keys `app.name`, `app.id` read by `:app`; version catalog `libs`.
 
 **Acceptance Criteria:**
 - `./gradlew help` succeeds from a clean checkout.
@@ -134,7 +139,6 @@ app.id=app.aria.music
 @file:Suppress("UnstableApiUsage")
 
 pluginManagement {
-    includeBuild("build-logic")
     repositories {
         google()
         mavenCentral()
@@ -166,39 +170,19 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "Aria"
-include(":domain", ":core", ":data", ":designsystem", ":innertube", ":playback", ":app")
+// Only modules that exist are included (Gradle 9 rejects an included project without a directory).
+// Each task that creates a module adds its own include(...) line in the same commit.
+include(":domain", ":core")
 ```
 
-- [ ] **Step 5: Write `build-logic` (precompiled script plugins)**
+- [ ] **Step 5: Define the explicit module build-file template**
 
-`build-logic/settings.gradle.kts`:
+There are no convention plugins in the foundation (stress-test branch 2): precompiled script plugins under AGP 9 are untested here, while Meld's explicit module files are known to build under AGP 9.3.1 and Gradle 9.7.0. Every Android library module's `build.gradle.kts` starts from this template, shown in full in each task:
 ```kotlin
-dependencyResolutionManagement {
-    repositories { google(); mavenCentral(); gradlePluginPortal() }
-    versionCatalogs { create("libs") { from(files("../gradle/libs.versions.toml")) } }
-}
-rootProject.name = "build-logic"
-include(":convention")
-```
-
-`build-logic/convention/build.gradle.kts`:
-```kotlin
-plugins { `kotlin-dsl` }
-
-dependencies {
-    implementation("com.android.tools.build:gradle:9.3.1")
-    implementation("org.jetbrains.kotlin:kotlin-gradle-plugin:2.4.10")
-    testImplementation("junit:junit:4.13.2")
-}
-
-kotlin { jvmToolchain(21) }
-```
-
-`build-logic/convention/src/main/kotlin/aria.android-library.gradle.kts`:
-```kotlin
-plugins { id("com.android.library") }
+plugins { id("com.android.library") /* + other plugins */ }
 
 android {
+    namespace = "app.aria.<module>"
     compileSdk = 37
     defaultConfig { minSdk = 26 }
     compileOptions {
@@ -210,17 +194,7 @@ android {
 
 kotlin { jvmToolchain(21) }
 ```
-
-`build-logic/convention/src/main/kotlin/aria.kotlin-library.gradle.kts`:
-```kotlin
-plugins { id("org.jetbrains.kotlin.jvm") }
-
-kotlin { jvmToolchain(21) }
-
-tasks.withType<Test> { useJUnit() }
-```
-
-These mirror Meld's `innertube/build.gradle.kts`, which builds under AGP 9.3.1 with `kotlin { jvmToolchain(21) }` and no separate Kotlin Android plugin.
+The pure-Kotlin `:domain` uses `id("org.jetbrains.kotlin.jvm")`, `kotlin { jvmToolchain(21) }` and `tasks.withType<Test> { useJUnit() }`. The template mirrors `/home/claude/francescograzioso/meld/innertube/build.gradle.kts`. Converting the repetition into convention plugins is an optional refactor after CI is green and the walking skeleton works; it is not part of this plan.
 
 - [ ] **Step 6: Write root `build.gradle.kts` and `.gitignore`**
 
@@ -274,13 +248,34 @@ Aria builds on the work of other open-source projects. Per module: what was take
 | [Metrolist](https://github.com/MetrolistGroup/Metrolist) | Common ancestor of Meld and Echo | Indirect |
 ```
 
-- [ ] **Step 8: Verify and commit**
+- [ ] **Step 8: Add a minimal CI and a foundation proof**
 
-Run: `./gradlew help`
-Expected: `BUILD SUCCESSFUL`.
+`.github/workflows/ci.yml` (Task 11 extends this file; it does not replace it):
+```yaml
+name: ci
+on:
+  push: { branches: [main] }
+  pull_request:
+permissions: { contents: read }
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 21 }
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew build test
+```
+Create the smallest proof that the build setup works: a `:domain` placeholder file `domain/src/main/kotlin/app/aria/domain/Placeholder.kt` is **not** acceptable; instead build Task 2's `:domain` and a trivial Android library together as the first push. Concretely, finish Task 2 Steps 1–5 before pushing, and include `:core` with an empty `core/build.gradle.kts` (the Android library template with `namespace = "app.aria.core"`). Then both module templates (pure Kotlin and Android library) are exercised by CI.
+
+- [ ] **Step 9: Verify, push, and confirm CI**
+
+Run locally if a build environment exists: `./gradlew build test`
+Expected: `BUILD SUCCESSFUL`. Then push and confirm the `ci` workflow is green. **If it is red, stop and fix the foundation before starting Task 3.** Compare against `/home/claude/francescograzioso/meld/innertube/build.gradle.kts` and the Meld root `build.gradle.kts` first.
 
 ```bash
-git add -A && git commit -m "build: scaffold Gradle project, catalog, convention plugins, single-source config"
+git add -A && git commit -m "build: scaffold Gradle project, catalog, single-source config, minimal CI"
 ```
 
 ---
@@ -310,7 +305,11 @@ git add -A && git commit -m "build: scaffold Gradle project, catalog, convention
 - [ ] **Step 1: Write `domain/build.gradle.kts`**
 
 ```kotlin
-plugins { id("aria.kotlin-library") }
+plugins { id("org.jetbrains.kotlin.jvm") }
+
+kotlin { jvmToolchain(21) }
+
+tasks.withType<Test> { useJUnit() }
 
 dependencies {
     testImplementation(kotlin("test"))
@@ -475,7 +474,7 @@ git add domain && git commit -m "feat(domain): add TrackId, track models and sou
 ### Task 3: Module-graph rule check
 
 **Files:**
-- Create: `build-logic/convention/src/main/kotlin/ModuleGraphRules.kt`, `build-logic/convention/src/test/kotlin/ModuleGraphRulesTest.kt`
+- Create: `buildSrc/build.gradle.kts`, `buildSrc/src/main/kotlin/ModuleGraphRules.kt`, `buildSrc/src/test/kotlin/ModuleGraphRulesTest.kt`
 - Modify: `build.gradle.kts` (register `checkModuleGraph`)
 
 **Interfaces:**
@@ -487,9 +486,22 @@ git add domain && git commit -m "feat(domain): add TrackId, track models and sou
 - A module not listed in the rules yields a violation telling the author to add a rule (new modules cannot dodge the check).
 - `:app` may depend on anything. `./gradlew checkModuleGraph` passes on the current tree.
 
+- [ ] **Step 0: Create `buildSrc/build.gradle.kts`**
+
+```kotlin
+plugins { `kotlin-dsl` }
+
+repositories { mavenCentral() }
+
+dependencies { testImplementation("junit:junit:4.13.2") }
+
+kotlin { jvmToolchain(21) }
+```
+`buildSrc` has no Android dependency on purpose, so it cannot be broken by AGP changes.
+
 - [ ] **Step 1: Write the failing test**
 
-`build-logic/convention/src/test/kotlin/ModuleGraphRulesTest.kt`:
+`buildSrc/src/test/kotlin/ModuleGraphRulesTest.kt`:
 ```kotlin
 // SPDX-License-Identifier: GPL-3.0-only
 import org.junit.Assert.assertEquals
@@ -527,12 +539,12 @@ class ModuleGraphRulesTest {
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `./gradlew -p build-logic :convention:test`
+Run: `./gradlew -p buildSrc test`
 Expected: FAIL, "Unresolved reference: ModuleGraphRules".
 
 - [ ] **Step 3: Implement**
 
-`build-logic/convention/src/main/kotlin/ModuleGraphRules.kt`:
+`buildSrc/src/main/kotlin/ModuleGraphRules.kt`:
 ```kotlin
 // SPDX-License-Identifier: GPL-3.0-only
 
@@ -567,7 +579,7 @@ object ModuleGraphRules {
 
 - [ ] **Step 4: Run to verify pass**
 
-Run: `./gradlew -p build-logic :convention:test`
+Run: `./gradlew -p buildSrc test`
 Expected: PASS, 4 tests.
 
 - [ ] **Step 5: Register the Gradle task**
@@ -589,7 +601,7 @@ tasks.register("checkModuleGraph") {
     }
 }
 ```
-If the root build script cannot see `ModuleGraphRules`, add `buildscript { dependencies { classpath("build-logic:convention") } }` or move the task into a precompiled plugin `aria.root` applied by the root; record whichever works in the commit message.
+Classes in `buildSrc` are visible to the root build script, so no extra wiring is needed.
 
 - [ ] **Step 6: Verify and commit**
 
@@ -621,14 +633,23 @@ git add -A && git commit -m "build: enforce module dependency rules with checkMo
 
 ```kotlin
 plugins {
-    id("aria.android-library")
+    id("com.android.library")
     alias(libs.plugins.kotlin.ksp)
 }
 
 android {
     namespace = "app.aria.data"
+    compileSdk = 37
+    defaultConfig { minSdk = 26 }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
+    testOptions { unitTests.isIncludeAndroidResources = true }
     sourceSets.getByName("test").assets.srcDir("$projectDir/schemas")
 }
+
+kotlin { jvmToolchain(21) }
 
 ksp { arg("room.schemaLocation", "$projectDir/schemas") }
 
@@ -893,7 +914,7 @@ git add -A && git commit -m "feat(data): add Room v1 with generic track_match ta
 The shared core tables come from Echo (and Meld for podcast and artist page cache). This task ports them with a recorded license audit and implements the walking skeleton's play-event repository on the ported `song` and `event` tables.
 
 **Files:**
-- Create: `data/src/main/kotlin/app/aria/data/entities/*` (ported, see Step 3), `data/src/main/kotlin/app/aria/data/PlayEventDao.kt`, `data/src/main/kotlin/app/aria/data/PlayEventRepositoryImpl.kt`, `data/src/test/kotlin/app/aria/data/PlayEventRepositoryTest.kt`
+- Create: `scripts/port-scan.sh`, `data/src/main/kotlin/app/aria/data/entities/*` (ported, see Step 3), `data/src/main/kotlin/app/aria/data/PlayEventDao.kt`, `data/src/main/kotlin/app/aria/data/PlayEventRepositoryImpl.kt`, `data/src/test/kotlin/app/aria/data/PlayEventRepositoryTest.kt`, `data/src/test/kotlin/app/aria/data/SchemaContentTest.kt`, `data/expected-schema.txt`
 - Modify: `data/src/main/kotlin/app/aria/data/AriaDatabase.kt`, `docs/provenance.csv`
 
 **Interfaces:**
@@ -905,6 +926,9 @@ The shared core tables come from Echo (and Meld for podcast and artist page cach
 - `record()` on an unknown track inserts the song row and one event row; a second call adds a second event; `playCount` returns 2.
 - `AriaDatabase` is still version 1; schema JSON regenerated and committed.
 - No Spotify or Qobuz match tables are ported (superseded by `track_match`).
+- `scripts/port-scan.sh data/src/main/kotlin/app/aria/data/entities` reports 0 foreign imports (stop rule: more than 10 distinct foreign imports means stop and ask the maintainer).
+- `AriaDatabase` registers the 24 ported and new tables **and** the three views (`SortedSongArtistMap`, `SortedSongAlbumMap`, `PlaylistSongMapPreview`); `SchemaContentTest` pins the exact table and view names to `data/expected-schema.txt`.
+- `MetadataExtensions.kt` is deliberately **not** ported: it is the only file in Echo's entities folder that imports Echo's `:metadata` cleaner types (`MetadataCleaner`, `CleanedMetadata`). Revisit it when the metadata module is ported.
 
 - [ ] **Step 1: Audit upstream licenses first**
 
@@ -944,6 +968,27 @@ grep -rn "androidx.compose" $DEST | head
 ```
 Expected: the final grep may show `androidx.compose.runtime.Immutable` imports (Echo's `Event` uses `@Immutable`). Either add `implementation(libs.compose.runtime)` to `:data` or delete the annotation and import; choose the dependency-free option (delete both). Then fix any remaining unresolved references by reading the compiler errors; entities referring to types outside the ported set (for example `Artist` extension helpers) are ported with the same procedure or removed if only used by Echo's UI.
 
+- [ ] **Step 3b: Scan for foreign imports (stop rule)**
+
+Create `scripts/port-scan.sh` (used again in Tasks 7 and 8):
+```bash
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Lists imports in ported code that still point into the source projects, and fails above a threshold.
+# usage: scripts/port-scan.sh <dir> [max-distinct=10]
+set -euo pipefail
+dir=${1:?usage: port-scan.sh <dir> [max-distinct]}
+max=${2:-10}
+foreign='^(echo\.music|com\.music\.echo|com\.metrolist\.(music|spotify|innertube\b))'
+found=$(grep -rhoE '^import [A-Za-z0-9_.]+' "$dir" --include=*.kt | sed 's/^import //' | grep -E "$foreign" | sort -u || true)
+count=$(printf '%s' "$found" | grep -c . || true)
+[ -n "$found" ] && printf '%s\n' "$found"
+echo "distinct foreign imports: $count (limit $max)"
+if [ "$count" -gt "$max" ]; then echo "STOP: scope is larger than planned; report to the maintainer" >&2; exit 1; fi
+```
+Run: `chmod +x scripts/port-scan.sh && scripts/port-scan.sh data/src/main/kotlin/app/aria/data/entities`
+Expected: `distinct foreign imports: 0 (limit 10)`. (Dry run on the planned file set against Echo at the pinned commit gave 0; the only file with foreign imports, `MetadataExtensions.kt`, is excluded.) If the count is between 1 and 10, resolve each import by porting the file it names (add a ledger row) or removing the usage. If it is above 10, **stop and report to the maintainer**.
+
 - [ ] **Step 4: Register entities in `AriaDatabase`**
 
 Replace the `@Database` line with the full entity list (ported names above plus `TrackMatchEntity`), keeping `version = 1`, and add DAOs as needed:
@@ -957,11 +1002,70 @@ Replace the `@Database` line with the full entity list (ported names above plus 
         RecognitionHistory::class, BeatInfoEntity::class, RecommendationExclusionEntity::class,
         SongPlayStatsEntity::class, TasteProfileEntity::class, PodcastEntity::class, ArtistPageCache::class,
     ],
+    views = [SortedSongArtistMap::class, SortedSongAlbumMap::class, PlaylistSongMapPreview::class],
     version = 1,
     exportSchema = true,
 )
 ```
-Add `abstract fun playEventDao(): PlayEventDao`. Add any `@DatabaseView` classes the ported entities require by reading the compiler error ("Unknown entity or view").
+Add `abstract fun playEventDao(): PlayEventDao`. The three views are registered explicitly because Room does not complain about a view that is simply left out; queries that need them would only fail later.
+
+- [ ] **Step 4b: Pin the schema contents**
+
+`data/src/test/kotlin/app/aria/data/SchemaContentTest.kt`:
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.data
+
+import java.io.File
+import org.json.JSONObject
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+
+/** Catches silent omissions: a table or view left out of @Database does not fail compilation. */
+@RunWith(RobolectricTestRunner::class)
+class SchemaContentTest {
+    private fun names(): Set<String> {
+        val db = JSONObject(File("schemas/app.aria.data.AriaDatabase/1.json").readText()).getJSONObject("database")
+        val entities = db.getJSONArray("entities")
+        val tables = (0 until entities.length()).map { "table:" + entities.getJSONObject(it).getString("tableName") }
+        val viewArray = db.optJSONArray("views")
+        val views = if (viewArray == null) emptyList() else
+            (0 until viewArray.length()).map { "view:" + viewArray.getJSONObject(it).getString("viewName") }
+        return (tables + views).toSet()
+    }
+
+    @Test fun tablesAndViewsMatchTheGoldenFile() {
+        val expected = File("expected-schema.txt").readLines().filter { it.isNotBlank() }.toSet()
+        assertEquals(expected, names())
+    }
+
+    @Test fun hasTwentyFourTablesAndThreeViews() {
+        val n = names()
+        assertEquals(24, n.count { it.startsWith("table:") })
+        assertEquals(3, n.count { it.startsWith("view:") })
+    }
+
+    @Test fun usesTheGenericMatchTableOnly() {
+        val n = names()
+        assertTrue("table:track_match" in n)
+        assertFalse(n.any { it.contains("spotify", ignoreCase = true) || it.contains("qobuz", ignoreCase = true) })
+    }
+}
+```
+Run: `./gradlew :data:testDebugUnitTest --tests '*SchemaContentTest'`
+Expected: FAIL, because `data/expected-schema.txt` does not exist yet (the build has just regenerated `schemas/.../1.json`).
+
+Generate the golden file from the exported schema, then **read it against the port list** (21 Echo tables, `PodcastEntity`, `ArtistPageCache`, `track_match`, plus the 3 views); do not accept it unread:
+```bash
+jq -r '.database | ((.entities[].tableName | "table:" + .), ((.views // [])[].viewName | "view:" + .))' \
+  data/schemas/app.aria.data.AriaDatabase/1.json | sort > data/expected-schema.txt
+cat data/expected-schema.txt
+```
+If the counts are not 24 and 3, check `grep -l "^@Entity" data/src/main/kotlin/app/aria/data/entities/*.kt` before changing the test; adjust the numbers only if an entity is legitimately absent from the port, and record why in the commit message. Re-run the test: PASS, 3 tests.
 
 - [ ] **Step 5: Write the failing repository test**
 
@@ -1099,25 +1203,38 @@ Implements the spec's registry security: strict schema, Ed25519 signature agains
 **Interfaces:**
 - Produces:
   - `@Serializable data class Registry(issuedAtEpochMs: Long, operations: Map<String, HashEntry>, totpSecret: String?, killSwitches: Map<String, Boolean>, youtubeClients: Map<String, String>)`; `@Serializable data class HashEntry(hash: String, previousHash: String?)`
-  - `class RegistryVerifier(publicKeys: List<ByteArray>, allowedOperations: Set<String>, maxAgeMs: Long, clock: () -> Long)` with `fun verify(payload: ByteArray, signature: ByteArray): VerifyResult`
+  - `class RegistryVerifier(publicKeys: List<ByteArray>, allowedOperations: Set<String>, maxAgeMs: Long, maxFutureSkewMs: Long = 300_000L, clock: () -> Long)` with `fun verify(payload: ByteArray, signature: ByteArray): VerifyResult` and `companion fun signingInput(payload: ByteArray): ByteArray` (the exact bytes that are signed: the context prefix `aria-registry-v1\n` followed by the payload; CI signing tools and tests must use it)
   - `sealed interface VerifyResult { data class Valid(val registry: Registry); data class Invalid(val reason: String) }`
   - `interface RegistryStore { fun read(): ByteArray?; fun write(bytes: ByteArray) }`
-  - `class RegistryRepository(verifier, store, embeddedFallback: Registry?)` with `fun accept(payload: ByteArray, signature: ByteArray): VerifyResult` and `fun current(): Registry?`
+  - `class RegistryRepository(verifier, store, embeddedFallback: Registry?)` with `fun accept(payload: ByteArray, signature: ByteArray): VerifyResult` (also rejects a registry older than the current one) and `fun current(): Registry?`
 
 **Acceptance Criteria:**
-- A correctly signed, in-schema, fresh payload is `Valid`. A payload signed by an unknown key, with a tampered byte, older than `maxAgeMs`, over 64 KiB, or with a hash that is not 64 lowercase hex characters, an operation name outside the allowlist, or a `youtubeClients` value outside `^[A-Za-z0-9_.-]{1,64}$` is `Invalid` with a reason.
+- A correctly signed, in-schema, fresh payload is `Valid`. A payload signed by an unknown key, signed without the context prefix, with a tampered byte, older than `maxAgeMs`, dated more than `maxFutureSkewMs` in the future, over 64 KiB, or with a hash that is not 64 lowercase hex characters, an operation name outside the allowlist, or a `youtubeClients` value outside `^[A-Za-z0-9_.-]{1,64}$` is `Invalid` with a reason.
 - Either of two embedded keys verifies (key rotation).
 - `RegistryRepository.accept` stores only `Valid` payloads; after an `Invalid` result `current()` still returns the previously accepted registry; with nothing stored it returns `embeddedFallback`.
+- Anti-rollback: a valid registry with `issuedAtEpochMs` lower than the currently held one (stored, or the embedded fallback when nothing is stored) is rejected; an equal timestamp is accepted.
+- The registry is signed, not encrypted, and is published on a public host: it must never contain anything confidential. (`totpSecret` is already public in the community source it is taken from.)
 
 - [ ] **Step 1: Write `core/build.gradle.kts`**
 
 ```kotlin
 plugins {
-    id("aria.android-library")
+    id("com.android.library")
     alias(libs.plugins.kotlin.serialization)
 }
 
-android { namespace = "app.aria.core" }
+android {
+    namespace = "app.aria.core"
+    compileSdk = 37
+    defaultConfig { minSdk = 26 }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
+    testOptions { unitTests.isIncludeAndroidResources = true }
+}
+
+kotlin { jvmToolchain(21) }
 
 dependencies {
     api(project(":domain"))
@@ -1162,7 +1279,8 @@ class RegistryVerifierTest {
     ) = """{"issuedAtEpochMs":$issuedAt,"operations":{"$op":{"hash":"$hash"}},"killSwitches":{"kugou":true},"youtubeClients":{"music":"$client"}}"""
         .toByteArray()
 
-    private fun sign(payload: ByteArray, key: Ed25519Sign.KeyPair = keyA) = Ed25519Sign(key.privateKey).sign(payload)
+    private fun sign(payload: ByteArray, key: Ed25519Sign.KeyPair = keyA) =
+        Ed25519Sign(key.privateKey).sign(RegistryVerifier.signingInput(payload))
 
     @Test fun validPayloadVerifies() {
         val p = json()
@@ -1186,6 +1304,22 @@ class RegistryVerifierTest {
         val sig = sign(p)
         p[p.size - 3] = (p[p.size - 3] + 1).toByte()
         assertTrue(verifier().verify(p, sig) is VerifyResult.Invalid)
+    }
+
+    @Test fun signatureOverBarePayloadWithoutContextIsRejected() {
+        val p = json()
+        val bare = Ed25519Sign(keyA.privateKey).sign(p)
+        assertTrue(verifier().verify(p, bare) is VerifyResult.Invalid)
+    }
+
+    @Test fun farFutureRegistryIsRejected() {
+        val p = json(issuedAt = now + 10 * 60_000L)
+        assertTrue(verifier().verify(p, sign(p)) is VerifyResult.Invalid)
+    }
+
+    @Test fun slightlyFutureRegistryWithinSkewIsAccepted() {
+        val p = json(issuedAt = now + 60_000L)
+        assertTrue(verifier().verify(p, sign(p)) is VerifyResult.Valid)
     }
 
     @Test fun staleRegistryIsRejected() {
@@ -1268,6 +1402,7 @@ class RegistryVerifier(
     private val publicKeys: List<ByteArray>,
     private val allowedOperations: Set<String>,
     private val maxAgeMs: Long,
+    private val maxFutureSkewMs: Long = 300_000L,
     private val clock: () -> Long,
 ) {
     private val json = Json { ignoreUnknownKeys = false }
@@ -1281,6 +1416,7 @@ class RegistryVerifier(
             return VerifyResult.Invalid("malformed registry: ${e.javaClass.simpleName}")
         }
         val age = clock() - registry.issuedAtEpochMs
+        if (age < -maxFutureSkewMs) return VerifyResult.Invalid("registry is dated ${-age} ms in the future, limit $maxFutureSkewMs")
         if (age > maxAgeMs) return VerifyResult.Invalid("registry is $age ms old, limit $maxAgeMs")
         registry.operations.forEach { (name, entry) ->
             if (name !in allowedOperations) return VerifyResult.Invalid("operation not allowed: $name")
@@ -1298,17 +1434,23 @@ class RegistryVerifier(
     private fun signedByAnyKey(payload: ByteArray, signature: ByteArray): Boolean =
         publicKeys.any { key ->
             try {
-                Ed25519Verify(key).verify(signature, payload)
+                Ed25519Verify(key).verify(signature, signingInput(payload))
                 true
             } catch (_: GeneralSecurityException) {
                 false
             }
         }
 
-    private companion object {
-        const val MAX_BYTES = 64 * 1024
-        val HASH = Regex("^[0-9a-f]{64}$")
-        val CLIENT_VALUE = Regex("^[A-Za-z0-9_.-]{1,64}$")
+    companion object {
+        /** The registry is signed, not encrypted, and published on a public host: never put secrets in it. */
+        private val CONTEXT = "aria-registry-v1\n".toByteArray()
+
+        /** The exact bytes that are signed. CI signing tools must use this same function. */
+        fun signingInput(payload: ByteArray): ByteArray = CONTEXT + payload
+
+        private const val MAX_BYTES = 64 * 1024
+        private val HASH = Regex("^[0-9a-f]{64}$")
+        private val CLIENT_VALUE = Regex("^[A-Za-z0-9_.-]{1,64}$")
     }
 }
 ```
@@ -1316,7 +1458,7 @@ class RegistryVerifier(
 - [ ] **Step 5: Run to verify pass**
 
 Run: `./gradlew :core:testDebugUnitTest --tests '*RegistryVerifierTest'`
-Expected: PASS, 10 tests.
+Expected: PASS, 13 tests.
 
 - [ ] **Step 6: Write the failing repository tests**
 
@@ -1345,7 +1487,7 @@ class RegistryRepositoryTest {
     private fun payload(issuedAt: Long, killKugou: Boolean) =
         """{"issuedAtEpochMs":$issuedAt,"killSwitches":{"kugou":$killKugou}}""".toByteArray()
 
-    private fun sig(p: ByteArray) = Ed25519Sign(key.privateKey).sign(p)
+    private fun sig(p: ByteArray) = Ed25519Sign(key.privateKey).sign(RegistryVerifier.signingInput(p))
 
     @Test fun validPayloadIsStoredAndCurrent() {
         val repo = RegistryRepository(verifier, MemStore(), embeddedFallback = null)
@@ -1361,6 +1503,30 @@ class RegistryRepositoryTest {
         val bad = payload(now, killKugou = false)
         assertTrue(repo.accept(bad, ByteArray(64)) is VerifyResult.Invalid)
         assertEquals(true, repo.current()?.killSwitches?.get("kugou"))
+    }
+
+    @Test fun olderRegistryThanStoredIsRejectedAsRollback() {
+        val repo = RegistryRepository(verifier, MemStore(), embeddedFallback = null)
+        val newer = payload(now, killKugou = true)
+        repo.accept(newer, sig(newer))
+        val older = payload(now - 5_000L, killKugou = false)
+        assertTrue(repo.accept(older, sig(older)) is VerifyResult.Invalid)
+        assertEquals(true, repo.current()?.killSwitches?.get("kugou"))
+    }
+
+    @Test fun equalTimestampIsAccepted() {
+        val repo = RegistryRepository(verifier, MemStore(), embeddedFallback = null)
+        val p = payload(now, killKugou = true)
+        repo.accept(p, sig(p))
+        assertTrue(repo.accept(p, sig(p)) is VerifyResult.Valid)
+    }
+
+    @Test fun registryOlderThanEmbeddedFallbackIsRejected() {
+        val embedded = Registry(issuedAtEpochMs = now + 100L, killSwitches = mapOf("kugou" to true))
+        val repo = RegistryRepository(verifier, MemStore(), embedded)
+        val older = payload(now, killKugou = false)
+        assertTrue(repo.accept(older, sig(older)) is VerifyResult.Invalid)
+        assertEquals(embedded, repo.current())
     }
 
     @Test fun nothingStoredFallsBackToEmbedded() {
@@ -1402,7 +1568,13 @@ class RegistryRepository(
 
     fun accept(payload: ByteArray, signature: ByteArray): VerifyResult {
         val result = verifier.verify(payload, signature)
-        if (result is VerifyResult.Valid) store.write(payload)
+        if (result !is VerifyResult.Valid) return result
+        // Anti-rollback: a replayed older registry could re-enable a killed provider or restore a rotated hash.
+        val floor = current()?.issuedAtEpochMs
+        if (floor != null && result.registry.issuedAtEpochMs < floor) {
+            return VerifyResult.Invalid("registry is older than the current one (rollback)")
+        }
+        store.write(payload)
         return result
     }
 
@@ -1417,7 +1589,7 @@ class RegistryRepository(
 - [ ] **Step 8: Run to verify pass and commit**
 
 Run: `./gradlew :core:testDebugUnitTest`
-Expected: PASS, 14 tests.
+Expected: PASS, 20 tests.
 
 ```bash
 git add -A && git commit -m "feat(core): add signed registry verification with last-known-good fallback"
@@ -1428,8 +1600,8 @@ git add -A && git commit -m "feat(core): add signed registry verification with l
 ### Task 7: `:designsystem` tokens and `GlassSurface` with fallback
 
 **Files:**
-- Create: `designsystem/build.gradle.kts`, `designsystem/src/main/kotlin/app/aria/designsystem/GlassMode.kt`, `designsystem/src/main/kotlin/app/aria/designsystem/GlassSurface.kt`, `designsystem/src/main/kotlin/app/aria/designsystem/Tokens.kt`, `designsystem/src/test/kotlin/app/aria/designsystem/GlassResolverTest.kt`, `designsystem/src/androidTest/kotlin/app/aria/designsystem/GlassSurfaceTest.kt`, ported `designsystem/src/main/kotlin/app/aria/designsystem/backdrop/*` and `GlassEffect.kt`
-- Modify: `docs/provenance.csv`
+- Create: `designsystem/build.gradle.kts`, `designsystem/src/main/kotlin/app/aria/designsystem/GlassMode.kt`, `designsystem/src/main/kotlin/app/aria/designsystem/GlassSurface.kt`, `designsystem/src/main/kotlin/app/aria/designsystem/Tokens.kt`, `designsystem/src/test/kotlin/app/aria/designsystem/GlassResolverTest.kt`, `designsystem/src/androidTest/kotlin/app/aria/designsystem/GlassSurfaceTest.kt`, `licenses/Apache-2.0.txt`, ported `designsystem/src/main/kotlin/app/aria/designsystem/backdrop/*` (30 files vendored from Kyant0/backdrop via Echo) and `GlassEffect.kt` (Echo's own wrapper)
+- Modify: `docs/provenance.csv`, `CREDITS.md`
 
 **Interfaces:**
 - Produces:
@@ -1441,20 +1613,30 @@ git add -A && git commit -m "feat(core): add signed registry verification with l
 **Acceptance Criteria:**
 - `resolve` returns `false` below API 31 in every mode, including `ON`; `AUTO` is `false` under battery saver; `OFF` is always `false`; `ON` is `true` on API 31+ regardless of battery saver.
 - On API 26–30 `GlassSurface` renders an opaque-enough translucent `Surface` with the same shape, using `AriaTokens.glassFallbackAlpha`, and the glass code path is never invoked.
-- The ported Echo backdrop code is recorded in the ledger with its audited license; Echo's logo, banner and seed color are not used.
+- The backdrop code is vendored from Kyant0/backdrop v2.0.0 (Apache-2.0, via Echo, which added a resolution scale), not replaced by the published artifact (stress-test branch 5). All 30 vendored files keep their original header, gain a `// Modified for Aria: package renamed.` line, and `licenses/Apache-2.0.txt` ships in the repo. `CREDITS.md` credits Kyant0/backdrop. The ledger has two rows: `backdrop` (Apache-2.0) and `GlassEffect.kt` (GPL-3.0).
+- Echo's logo, banner and seed color are not used.
 
 - [ ] **Step 1: Write `designsystem/build.gradle.kts`**
 
 ```kotlin
 plugins {
-    id("aria.android-library")
+    id("com.android.library")
     alias(libs.plugins.compose.compiler)
 }
 
 android {
     namespace = "app.aria.designsystem"
+    compileSdk = 37
+    defaultConfig { minSdk = 26 }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
+    testOptions { unitTests.isIncludeAndroidResources = true }
     buildFeatures { compose = true }
 }
+
+kotlin { jvmToolchain(21) }
 
 dependencies {
     implementation(libs.compose.foundation)
@@ -1554,20 +1736,51 @@ object AriaTokens {
 Run: `./gradlew :designsystem:testDebugUnitTest`
 Expected: PASS, 5 tests.
 
-- [ ] **Step 6: Audit and port the backdrop code**
+- [ ] **Step 6: Audit and port the backdrop code (Apache-2.0 vendored code)**
 
+Audit (read-only). At the pinned Echo commit, 30 of the 31 files carry the header `Vendored from Kyant0/backdrop v2.0.0 (io.github.kyant0:backdrop) ... Copyright 2025 Kyant0, Apache License 2.0`, and the 31st (`GlassEffect.kt`) is Echo's own wrapper under GPL-3.0. Confirm that still holds:
 ```bash
 E=/home/claude/echomusicapp/echo-music/app/src/main/kotlin/com/music/echo/ui/component
-head -12 $E/GlassEffect.kt; ls $E/backdrop | head -30; head -12 $E/backdrop/*.kt | grep -i -E "licen|SPDX|copyright" | head
+find $E/backdrop $E/GlassEffect.kt -name '*.kt' | wc -l
+find $E/backdrop -name '*.kt' | xargs grep -L "Vendored from Kyant0/backdrop v2.0.0" || true
+find $E/backdrop $E/GlassEffect.kt -name '*.kt' | xargs grep -h -o -i -E "Apache License 2.0|GPL-3.0" | sort | uniq -c
 ```
-Record the license found (or "no header") and add a `docs/provenance.csv` row for `designsystem/src/main/kotlin/app/aria/designsystem/backdrop` and `GlassEffect.kt` (origin `EchoMusicApp/Echo-Music`, commit `b04d7507b33c0671b3a23d2658b24a376add4cc7`, kind `adapted`). If the header names a license other than GPL-3.0 or the code carries third-party notices, stop and ask the maintainer. Otherwise:
+Expected: `31`; the second command lists nothing; the third shows 30 `Apache License 2.0` and 1 `GPL-3.0`. Any other license name, or a file with no header, stops the port: ask the maintainer.
+
+Why vendor instead of depending on `io.github.kyant0:backdrop`: Echo's change adds a backdrop resolution scale (the cheaper-rendering feature this design needs) that upstream lacks, and Echo's header records that the binary AARs broke at runtime against its Compose version. Aria is on a newer Compose, so that risk is not assumed away.
+
+Port, with the Apache-2.0 obligations:
 ```bash
 D=/home/claude/aria/designsystem/src/main/kotlin/app/aria/designsystem
 mkdir -p $D/backdrop && cp -r $E/backdrop/. $D/backdrop/ && cp $E/GlassEffect.kt $D/GlassEffect.kt
-sed -i 's/echo\.music\.iad1tya\.ui\.component/app.aria.designsystem/g; s/com\.music\.echo\.ui\.component/app.aria.designsystem/g' $D/GlassEffect.kt $D/backdrop/*.kt
-for f in $D/GlassEffect.kt $D/backdrop/*.kt; do grep -q -E "SPDX-License-Identifier|Licensed under" "$f" || sed -i '1i // SPDX-License-Identifier: GPL-3.0-only' "$f"; done
+# find, not a glob: the backdrop tree has nested directories (effects, shadow, highlight, backdrops, internal)
+find $D -name '*.kt' | xargs sed -i 's/echo\.music\.iad1tya\.ui\.component/app.aria.designsystem/g; s/com\.music\.echo\.ui\.component/app.aria.designsystem/g'
+# Apache-2.0 section 4(b): modified files carry a notice that they were changed
+for f in $(grep -rl "Vendored from Kyant0/backdrop" $D); do
+  grep -q "Modified for Aria" "$f" || sed -i 's|^package |// Modified for Aria: package renamed.\npackage |' "$f"
+done
+# SPDX header only where no original header exists (GlassEffect.kt keeps Echo's GPL-3.0 header)
+for f in $(find $D -name '*.kt'); do grep -q -E "SPDX-License-Identifier|Licensed under|Vendored from|Copyright" "$f" || sed -i '1i // SPDX-License-Identifier: GPL-3.0-only' "$f"; done
+# Apache-2.0 section 4(a): ship a copy of the license
+cd /home/claude/aria && mkdir -p licenses && cp /usr/share/common-licenses/Apache-2.0 licenses/Apache-2.0.txt
+head -3 licenses/Apache-2.0.txt
+grep -rL "Modified for Aria" $(grep -rl "Vendored from" $D) || true
+chmod +x scripts/port-scan.sh && scripts/port-scan.sh designsystem/src/main/kotlin
 ```
-Remove any dependency of the ported files on Echo-only types (for example `LocalGlassEffectConfig` consumers in settings) by reading the compiler errors; keep `Modifier.liquidGlass(config, shape, applyEdgeEffects)`, `LocalAppBackdrop`, and `isGlassSupported`.
+Expected: the `head` shows `Apache License` and `Version 2.0, January 2004` (if the system file is absent, download the text from apache.org/licenses/LICENSE-2.0.txt and check the same two lines); the `grep -rL` prints nothing; the scan prints `distinct foreign imports: 0 (limit 10)` (a dry run at the pinned commit gave 0 after the rename). The only non-platform import left is `org.intellij.lang.annotations.Language`, which comes with the Kotlin toolchain's annotations dependency; add `compileOnly("org.jetbrains:annotations:26.0.2")` to `designsystem/build.gradle.kts` only if the compiler cannot resolve it.
+
+Upstream NOTICE: with network access, run `curl -sSL -o /dev/null -w '%{http_code}\n' https://raw.githubusercontent.com/Kyant0/backdrop/main/NOTICE`. `404` means no NOTICE file; `200` means copy its contents to `licenses/NOTICE`. Without network access, write "NOTICE not checked" in the ledger notes; `docs/release-gates.md` (Task 12) makes this check a gate before the first beta.
+
+Ledger rows (append to `docs/provenance.csv`; the notes contain commas, so quote them):
+```csv
+designsystem/src/main/kotlin/app/aria/designsystem/backdrop,EchoMusicApp/Echo-Music,b04d7507b33c0671b3a23d2658b24a376add4cc7,Apache-2.0,adapted,"Vendored by Echo from Kyant0/backdrop v2.0.0 (Copyright 2025 Kyant0) with Echo changes (backdrop resolution scale; RoundedRectangularShape support dropped); package renamed again for Aria; 30 files"
+designsystem/src/main/kotlin/app/aria/designsystem/GlassEffect.kt,EchoMusicApp/Echo-Music,b04d7507b33c0671b3a23d2658b24a376add4cc7,GPL-3.0,adapted,"Echo liquidGlass wrapper (vivimusic lineage header); package renamed"
+```
+Append to `CREDITS.md`:
+```markdown
+| [Kyant0/backdrop](https://github.com/Kyant0/backdrop) v2.0.0 (Apache-2.0) | Backdrop blur, lens and highlight effects (30 files in `designsystem/.../backdrop`) | Vendored by Echo Music and taken from there with Echo's changes (resolution scale added, shapes support removed); package renamed. Original copyright headers kept; license text in `licenses/Apache-2.0.txt` |
+```
+Then remove any dependency of the ported files on Echo-only types (for example `LocalGlassEffectConfig` consumers in settings) by reading the compiler errors; keep `Modifier.liquidGlass(config, shape, applyEdgeEffects)`, `LocalAppBackdrop`, and `isGlassSupported`.
 
 - [ ] **Step 7: Implement `GlassSurface`**
 
@@ -1687,10 +1900,11 @@ grep -rl "com\.metrolist\.innertube\b" $D | xargs sed -i 's/com\.metrolist\.inne
 sed -i 's/namespace = "com.metrolist.innertube"/namespace = "app.aria.innertube"/' $D/build.gradle.kts
 grep -rn "com.metrolist.innertubex" $D | wc -l
 grep -rn "com\.metrolist\.innertube[^x]" $D | head -3
+cd /home/claude/aria && scripts/port-scan.sh innertube/src/main/kotlin
 ```
-Expected: the first count is non-zero (library imports kept); the second command prints nothing.
+Expected: the first count is non-zero (library imports kept); the second command prints nothing; the scan prints `distinct foreign imports: 0 (limit 10)` (a dry run against Meld at the pinned commit gave 0). More than 10 means stop and ask the maintainer.
 
-Then edit `innertube/build.gradle.kts`: replace `id("com.android.library")` with `id("aria.android-library")`, delete the `android { ... }` and `kotlin { jvmToolchain(21) }` blocks that the convention plugin now provides, keep `namespace = "app.aria.innertube"` inside a minimal `android { namespace = ... }`, and add `api(project(":domain"))`.
+Then edit `innertube/build.gradle.kts`: Meld's file is already in the explicit template form, so keep its plugins, `android` and `kotlin` blocks; change only the namespace (done by the sed above), add `testOptions { unitTests.isIncludeAndroidResources = true }`, and add `api(project(":domain"))` to `dependencies`. Add `include(":innertube")` to `settings.gradle.kts`.
 
 - [ ] **Step 2: Add SPDX headers and the ledger row**
 
@@ -1883,9 +2097,20 @@ Smallest Media3 foreground service that proves the boundary: depends only on `:d
 - [ ] **Step 1: Write `playback/build.gradle.kts`**
 
 ```kotlin
-plugins { id("aria.android-library") }
+plugins { id("com.android.library") }
 
-android { namespace = "app.aria.playback" }
+android {
+    namespace = "app.aria.playback"
+    compileSdk = 37
+    defaultConfig { minSdk = 26 }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
+    testOptions { unitTests.isIncludeAndroidResources = true }
+}
+
+kotlin { jvmToolchain(21) }
 
 dependencies {
     api(project(":domain"))
@@ -2095,7 +2320,10 @@ class AriaPlaybackService : MediaSessionService() {
     }
 }
 
-/** Process-local handle the app uses to reach the running service's player. */
+/**
+ * Process-local handle the app uses to reach the running service's player.
+ * TODO(sub-project 2): skeleton shortcut. Replace with a bound MediaController; do not build on this.
+ */
 object PlaybackHost {
     @Volatile var player: Player? = null
 }
@@ -2333,6 +2561,8 @@ Remove the Firebase-related lines Meld's catalog may carry (`grep -n -i firebase
 ```xml
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android 13+: without it the media notification is silently hidden. Requested at first play. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:name=".AriaApp"
         android:label="@string/app_name"
@@ -2463,6 +2693,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import android.Manifest
+import android.os.Build
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -2494,6 +2728,8 @@ fun SkeletonScreen(
     var plays by remember { mutableStateOf(0) }
     // One controller per playback session: it remembers the start time that Stop needs.
     var controller by remember { mutableStateOf<PlayerController?>(null) }
+    // Android 13+: ask once at first play. Playback continues if the user says no (no notification then).
+    val notificationPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
     GlassSurface(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -2522,8 +2758,12 @@ fun SkeletonScreen(
                 items(results) { t ->
                     Button(onClick = {
                         scope.launch {
-                            context.startForegroundService(Intent(context, AriaPlaybackService::class.java))
-                            kotlinx.coroutines.delay(500) // service creates PlaybackHost.player on start
+                            if (Build.VERSION.SDK_INT >= 33) notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                            // startService, not startForegroundService: Media3 promotes the service itself once playback
+                            // starts, whereas startForegroundService crashes (ForegroundServiceDidNotStartInTimeException)
+                            // if playback never starts, for example when stream resolution fails.
+                            context.startService(Intent(context, AriaPlaybackService::class.java))
+                            kotlinx.coroutines.delay(500) // skeleton shortcut: service creates PlaybackHost.player on start
                             val player = PlaybackHost.player ?: run { status = "Player not ready"; return@launch }
                             val c = PlayerController(streams, events, player, resume, System::currentTimeMillis)
                             c.start(t)
@@ -2537,7 +2777,7 @@ fun SkeletonScreen(
     }
 }
 ```
-The 500 ms delay waiting for the service is a skeleton shortcut and must not be copied into production code; sub-project 2 replaces it with a bound `MediaController`. Record that in the commit message.
+The 500 ms delay and the `PlaybackHost` singleton are skeleton shortcuts and must not be copied into production code; sub-project 2 replaces both with a bound `MediaController` (the `TODO(sub-project 2)` marker on `PlaybackHost` is the hand-off). Record that in the commit message. The service start uses `startService` on purpose; a reviewer who "fixes" it to `startForegroundService` reintroduces the crash described in the code comment.
 
 `app/src/main/kotlin/app/aria/music/MainActivity.kt`:
 ```kotlin
@@ -2595,7 +2835,8 @@ git add -A && git commit -m "feat(app): walking skeleton, crash log, backup rule
 ### Task 11: CI, nightly smoke test, provenance and license gates
 
 **Files:**
-- Create: `.github/workflows/ci.yml`, `.github/workflows/smoke.yml`, `scripts/check-provenance.py`, `scripts/test_check_provenance.py`, `innertube/src/test/kotlin/app/aria/innertube/smoke/PlaybackSmokeTest.kt`
+- Modify: `.github/workflows/ci.yml` (created in Task 1; this task adds jobs and steps to it)
+- Create: `.github/workflows/smoke.yml`, `.github/dependabot.yml`, `scripts/check-actions-pinned.sh`, `gradle/verification-metadata.xml`, `scripts/check-provenance.py`, `scripts/test_check_provenance.py`, `innertube/src/test/kotlin/app/aria/innertube/smoke/PlaybackSmokeTest.kt`
 - Modify: `innertube/build.gradle.kts` (smoke test exclusion), `build.gradle.kts` (license report plugin)
 
 **Interfaces:**
@@ -2605,7 +2846,8 @@ git add -A && git commit -m "feat(app): walking skeleton, crash log, backup rule
 **Acceptance Criteria:**
 - `ci.yml` runs on every PR and push: builds `foss` and `gms` debug, unit tests for every module, `checkModuleGraph`, the backup-rules and destructive-migration scripts, the provenance check, and fails if `data/schemas` changed without a matching tracked file.
 - `check-provenance.py` fails for: a module directory with no row; a row whose `kind` is not one of `copied|adapted|inspired|original`; a non-`original` row without a 40-hex `origin_commit` or without `origin_license`.
-- `smoke.yml` runs nightly, resolves three fixed public tracks through `YouTubeStreamSource`, and opens a GitHub issue on failure.
+- `smoke.yml` runs nightly, resolves three fixed public tracks through `YouTubeStreamSource`, and opens one GitHub issue on failure (later failures comment on it), and fails if the smoke test was skipped rather than run.
+- Every `uses:` in `.github/workflows` is pinned to a full commit SHA (enforced by `check-actions-pinned.sh`), the Gradle wrapper is validated, Dependabot covers Actions and Gradle, and `gradle/verification-metadata.xml` is committed and enforced.
 - The license report job fails on a dependency whose license is not on the allowlist (Apache-2.0, MIT, BSD, GPL-3.0, LGPL, MPL-2.0, EPL, CC0, public domain, Unicode/ICU).
 
 - [ ] **Step 1: Write the failing provenance tests**
@@ -2737,18 +2979,24 @@ Expected: PASS with the smoke test skipped (assumption not met).
 
 - [ ] **Step 5: Write the workflows**
 
-`.github/workflows/ci.yml`:
+Replace the minimal `ci.yml` from Task 1 with this fuller one (same triggers; pin per Step 5b):
 ```yaml
 name: ci
 on:
   push: { branches: [main] }
   pull_request:
 permissions: { contents: read }
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: gradle/actions/wrapper-validation@v4
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 21 }
       - uses: gradle/actions/setup-gradle@v4
@@ -2759,6 +3007,10 @@ jobs:
           python3 scripts/check-provenance.py .
           scripts/check-backup-rules.sh
           scripts/check-no-destructive-migration.sh
+          scripts/check-actions-pinned.sh
+          test -f gradle/verification-metadata.xml
+      - name: Build-logic tests (module-graph rules)
+        run: ./gradlew -p buildSrc test
       - name: Module graph
         run: ./gradlew checkModuleGraph
       - name: Unit tests (all modules)
@@ -2766,11 +3018,15 @@ jobs:
       - name: Build both flavors
         run: ./gradlew :app:assembleFossDebug :app:assembleGmsDebug
       - name: Schema is committed and unchanged
-        run: git diff --exit-code -- data/schemas
+        # git diff ignores untracked files, so a forgotten new version file (2.json) would pass; status sees both.
+        run: |
+          out="$(git status --porcelain -- data/schemas)"
+          if [ -n "$out" ]; then echo "Room schema changed or uncommitted:"; echo "$out"; exit 1; fi
       - name: Dependency licenses
         run: ./gradlew checkLicense
   glass-ui:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       matrix: { api: [26, 34] }
     steps:
@@ -2799,19 +3055,87 @@ permissions: { contents: read, issues: write }
 jobs:
   smoke:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 21 }
       - uses: gradle/actions/setup-gradle@v4
       - run: ./gradlew :innertube:testDebugUnitTest -PrunSmoke=true --tests '*PlaybackSmokeTest'
-      - name: Open an issue on failure
+      - name: Fail if the smoke test was skipped instead of run
+        # assumeTrue skips silently when the property does not reach the test JVM; a skipped nightly must not look green.
+        run: |
+          f=$(ls innertube/build/test-results/testDebugUnitTest/*PlaybackSmokeTest.xml)
+          grep -q 'tests="1"' "$f" && grep -q 'skipped="0"' "$f" || { echo "Smoke test did not run:"; head -3 "$f"; exit 1; }
+      - name: Report failure (one open issue, not one per night)
         if: failure()
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
-          gh issue create --title "Nightly playback smoke test failed ($(date -u +%F))" \
-            --body "See run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID. Note: YouTube may block datacenter IPs; if this fails every night with no code change, run the same command from the maintainer's machine on a schedule instead."
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          gh label create smoke-failure --color B60205 --description "Nightly playback smoke test" 2>/dev/null || true
+          n=$(gh issue list --label smoke-failure --state open --json number --jq '.[0].number // empty')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --body "Failed again ($(date -u +%F)): $run_url"
+          else
+            gh issue create --label smoke-failure --title "Nightly playback smoke test failed ($(date -u +%F))" \
+              --body "See run: $run_url. Note: YouTube may block datacenter IPs; if this fails every night with no code change, run the same command from the maintainer's machine on a schedule instead."
+          fi
 ```
+
+- [ ] **Step 5b: Supply-chain hardening (stress-test branch 8)**
+
+The YAML above shows tags for readability; after this step every `uses:` line is pinned.
+
+1. Pin check. `scripts/check-actions-pinned.sh` (already run in the Static checks step):
+```bash
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Fails if any workflow step uses an Action that is not pinned to a full 40-hex commit SHA.
+set -euo pipefail
+root="${1:-.}"
+bad=$(grep -rnE '^\s*-?\s*uses:\s' "$root/.github/workflows" 2>/dev/null \
+  | grep -vE 'uses:\s*\./' \
+  | grep -vE 'uses:\s*[^@[:space:]]+@[0-9a-f]{40}(\s|$)' || true)
+if [ -n "$bad" ]; then
+  echo "Actions must be pinned to a full commit SHA (add the version as a trailing comment):" >&2
+  echo "$bad" >&2
+  exit 1
+fi
+echo "all workflow actions are SHA-pinned"
+```
+A dry run on a scratch workflow gave exit 1 for `actions/checkout@v4` and exit 0 once it was replaced by a 40-hex SHA with a trailing `# v4` comment. Make it executable with `chmod +x`.
+
+2. Pin every `uses:` in `ci.yml` and `smoke.yml`. For each action and tag, resolve the SHA (needs network and a working `gh`), then rewrite the line as `uses: owner/repo@<sha> # vX.Y.Z`:
+```bash
+gh api repos/actions/checkout/git/ref/tags/v4 --jq '.object | "\(.type) \(.sha)"'
+# if type is "tag" (annotated), dereference once more:
+gh api repos/actions/checkout/git/tags/<sha> --jq '.object.sha'
+```
+Use the full tag (for example `v4.2.2`), not a moving major tag, so the comment says exactly what was pinned. Run `scripts/check-actions-pinned.sh .` until it exits 0. Actions to pin: `actions/checkout`, `actions/setup-java`, `gradle/actions/setup-gradle`, `gradle/actions/wrapper-validation`, `reactivecircus/android-emulator-runner`.
+
+3. `.github/dependabot.yml`:
+```yaml
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    groups: { actions: { patterns: ["*"] } }
+  - package-ecosystem: gradle
+    directory: /
+    schedule: { interval: weekly }
+    groups: { gradle-deps: { patterns: ["*"] } }
+```
+
+4. Gradle dependency verification. With network access, generate and commit the checksums:
+```bash
+./gradlew --write-verification-metadata sha256 :app:assembleFossDebug :app:assembleGmsDebug test
+git add gradle/verification-metadata.xml
+```
+When the file exists Gradle enforces it on every build, so CI fails on any dependency whose checksum is missing or different. After any dependency bump (including Dependabot PRs, which cannot regenerate the file) run `./gradlew --write-verification-metadata sha256 help`, review the diff, and commit it. Record this in `CONTRIBUTING.md` (Task 12). A reviewer rejects any wildcard `<trusted-artifacts>` entry.
+
+Run: `scripts/check-actions-pinned.sh . && ./gradlew :app:assembleFossDebug`
+Expected: `all workflow actions are SHA-pinned`, then BUILD SUCCESSFUL under verification. If the sandbox has no network, do the pinning and checksum generation on the first run that has it (the Prerequisite already requires the GitHub repo).
 
 - [ ] **Step 6: License gate**
 
@@ -2925,6 +3249,7 @@ Add a sentence per provider here whenever a provider record is added.
 ## Before the first beta
 - [ ] License and provenance audit passes: every ported directory has a ledger row, upstream license read, SPDX headers present, font license texts included (or fonts replaced).
 - [ ] Vendored native code (`vibrafp`) audited or excluded.
+- [ ] Kyant0/backdrop upstream `NOTICE` file checked (copy to `licenses/NOTICE` if it exists); `licenses/Apache-2.0.txt` present.
 - [ ] Privacy policy matches `docs/data-flow.md` for every provider shipped.
 - [ ] Room schema frozen; every change after this needs a tested migration.
 
@@ -2937,7 +3262,7 @@ Add a sentence per provider here whenever a provider record is added.
 
 - [ ] **Step 5: CONTRIBUTING, CREDITS lines, catalog trim**
 
-`CONTRIBUTING.md`: states the rules a contributor must follow (GPL-3.0-only header on every new file; new provider needs a record in `docs/providers/` first; ported code needs a ledger row and an upstream license check before the PR; module dependency rules enforced by `checkModuleGraph`; no telemetry).
+`CONTRIBUTING.md`: states the rules a contributor must follow (GPL-3.0-only header on every new file; new provider needs a record in `docs/providers/` first; ported code needs a ledger row and an upstream license check before the PR; module dependency rules enforced by `checkModuleGraph`; no telemetry; Actions stay SHA-pinned; after any dependency bump regenerate `gradle/verification-metadata.xml` with `./gradlew --write-verification-metadata sha256 help` and review the diff).
 
 Update `CREDITS.md` so each ledger row has a specific line (for example: "`innertube`: Meld's module, copied with package rename, wraps InnerTubeX; parsing code remains from Meld/Metrolist").
 
@@ -3001,3 +3326,20 @@ These spec items are **not** built in this plan, by design, because they belong 
 4. Shrinking Meld's inherited response-parsing code (tracked follow-up, not a v1 promise).
 5. `./gradlew lint` baseline and CI step (add after the first baseline exists; flagged in the table above rather than silently dropped).
 6. Fonts: none are ported in this plan, so their license texts are a gate for the sub-project that adds them.
+
+## Stress Test Results
+
+Run 2026-10-30, Mode A (edits applied inline). Eight branches, each answered "Agree"; all eight changed the plan.
+
+| # | Branch | Finding | Change |
+|---|--------|---------|--------|
+| 1 | Verification and delivery | Nothing can be compiled or pushed from the planning sandbox | Prerequisite (GitHub repo, push access) and a Definition of done of green CI per task |
+| 2 | Module and build structure | `settings.gradle.kts` listing absent modules fails under Gradle 9; `build-logic` convention plugins cannot be verified under AGP 9 | Include each module in its own task; explicit per-module files plus `buildSrc` |
+| 3 | Registry verifier | Future-dated payloads, rollback and cross-protocol signature reuse were possible | Future-skew rejection, anti-rollback in `RegistryRepository.accept`, `aria-registry-v1` signing context |
+| 4 | Entity port | Glob missed nested backdrop dirs; `@Database` lacked views; port scan needed a limit | `find`-based rename, views and `SchemaContentTest`, `scripts/port-scan.sh` with a limit of 10 |
+| 5 | Glass provenance | Backdrop code is Apache-2.0 (Kyant0), not GPL-3.0; the old step would have stopped or mislabelled it | Vendor with Apache-2.0 attribution: license text, per-file modified notice, `CREDITS.md`, two ledger rows, NOTICE check as a beta gate |
+| 6 | Service start | `startForegroundService` crashes if playback never starts; no notification permission on Android 13+ | `startService`, first-play `POST_NOTIFICATIONS` request, `PlaybackHost` marked `TODO(sub-project 2)` |
+| 7 | CI correctness | Schema check ignored untracked files; smoke test could skip silently; duplicate nightly issues; `buildSrc` tests not run | `git status --porcelain` check, skipped-test failure, one labelled issue, `-p buildSrc test`, timeouts and concurrency |
+| 8 | Supply chain | Actions on mutable tags; wrapper unvalidated; no dependency pinning (InnerTubeX comes from JitPack) | Step 5b: SHA-pinned Actions with enforcing script, wrapper validation, Dependabot, committed Gradle dependency verification |
+
+Remaining risks, all needing network or the maintainer: Task 0 spike results (InnerTubeX license and store policy, PoToken), upstream Kyant0 NOTICE file, "Aria" name and trademark clearance, and the SHA and checksum generation in Task 11 Step 5b.

@@ -87,7 +87,7 @@ Only code is ported. Echo's and Meld's logos, banners, screenshots and Echo's se
 ## 6. Build, DI, CI, testing
 
 - **DI:** Hilt 2.60.1. Each source module exposes a Hilt module providing `:domain` interfaces.
-- **Build:** Gradle version catalog on Meld's newer versions (Kotlin 2.4.10, Compose 1.12.0, Media3 1.10.1, Room 2.8.x, Ktor 3.x, Coil 3.x), convention plugins in `build-logic`. `compileSdk 37`, `targetSdk 36`, `minSdk 26`.
+- **Build:** Gradle version catalog on Meld's newer versions (Kotlin 2.4.10, Compose 1.12.0, Media3 1.10.1, Room 2.8.x, Ktor 3.x, Coil 3.x), explicit per-module build files and a `buildSrc` module for the module-graph rule; shared convention plugins come after the foundation builds green under AGP 9. `compileSdk 37`, `targetSdk 36`, `minSdk 26`.
 - **Flavors:** `foss` (the recommended download) and `gms` ("foss plus Google Cast", the only thing the `gms` flavor adds); ABI splits arm64 and universal. No Firebase, no analytics, no crash-reporting service in either flavor. No ads. Updates are notify-only. Echo's Play Services Location dependency is not carried over unless sub-project 6 shows a real need.
 - **Takedown hygiene:** no Google, YouTube, Spotify, Apple, Qobuz or Tidal names or logos in the app name, icon or listing; a non-affiliation notice in the README and About screen; repo on an account you control with 2FA; mirror on Codeberg; signing key backed up offline.
 - **CI (GitHub Actions):** build both flavors, lint, unit tests, Room schema check, dependency-license scan. Signing keys in secrets. Aria hosts **its own signed registry** (section 7) and never depends on Meld's.
