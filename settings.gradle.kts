@@ -35,5 +35,5 @@ dependencyResolutionManagement {
 rootProject.name = "Aria"
 // Only modules that exist are included (Gradle 9 rejects an included project without a directory).
 // Each task that creates a module adds its own include(...) line in the same commit.
-// Task 2 adds ":domain".
 include(":core")
+include(":domain")
