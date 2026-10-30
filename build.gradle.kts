@@ -19,3 +19,18 @@ buildscript {
         classpath(kotlin("gradle-plugin", libs.versions.kotlin.get()))
     }
 }
+
+tasks.register("checkModuleGraph") {
+    group = "verification"
+    description = "Fails if a module depends on one it is not allowed to."
+    doLast {
+        val graph = subprojects.associate { p ->
+            p.path to p.configurations
+                .flatMap { it.dependencies.withType(org.gradle.api.artifacts.ProjectDependency::class.java) }
+                .map { it.path }
+                .toSet()
+        }
+        val violations = ModuleGraphRules.violations(graph)
+        if (violations.isNotEmpty()) throw GradleException("Module graph violations:\n" + violations.joinToString("\n"))
+    }
+}

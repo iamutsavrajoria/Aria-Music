@@ -33,6 +33,10 @@ class TrackIdTest {
         assertFailsWith<IllegalArgumentException> { TrackId.parse("short") }
     }
 
+    @Test fun rejectsElevenCharBareIdWithInvalidCharacter() {
+        assertFailsWith<IllegalArgumentException> { TrackId.parse("dQw4w9WgXc!") }
+    }
+
     @Test fun rejectsEmptyPrefixedValue() {
         assertFailsWith<IllegalArgumentException> { TrackId.parse("local:") }
         assertFailsWith<IllegalArgumentException> { TrackId.of(TrackSource.PODCAST, " ") }
