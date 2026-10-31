@@ -43,6 +43,20 @@ jobs:
       - name: Dependency licenses
         # The license plugin needs --no-parallel on Gradle 9 multi-project builds.
         run: scripts/ci-gradle.sh checkLicense --no-parallel
+      - name: List disallowed license names (temporary diagnostic)
+        if: failure()
+        run: |
+          f=build/reports/dependency-license/dependencies-without-allowed-license.json
+          [ -f "$f" ] && echo "::error title=license-names::$(python3 -c "
+import json,sys,collections
+d=json.load(open('$f'))
+c=collections.defaultdict(list)
+for dep in d.get('dependencies',[]):
+    names=tuple(sorted({l.get('license_name') or l.get('moduleLicense') or '?' for l in (dep.get('licenses') or [])} | {l.get('moduleLicense') or '?' for l in (dep.get('moduleLicenses') or [])}))
+    c[names].append(dep.get('moduleName') or dep.get('moduleGroup'))
+print(' || '.join('%s: %d e.g. %s' % (k,len(v),v[:2]) for k,v in c.items()))
+" | sed 's/%/%25/g')"
+          exit 0
   # UNVERIFIED locally (no emulator available when this job was written): first CI run is its real test.
   glass-ui:
     runs-on: ubuntu-latest
