@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-only
-plugins { id("com.android.library") }
+plugins {
+    id("com.android.library")
+    alias(libs.plugins.kotlin.serialization)
+}
 
 android {
     namespace = "app.aria.core"
@@ -13,3 +16,11 @@ android {
 }
 
 kotlin { jvmToolchain(21) }
+
+dependencies {
+    api(project(":domain"))
+    implementation(libs.tink.android)
+    // kotlinx-serialization-json has no catalog alias; the ktor serialization artifact exposes it as an api dependency.
+    implementation(libs.ktor.serialization.json)
+    testImplementation(libs.junit)
+}
