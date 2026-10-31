@@ -20,9 +20,3 @@ jobs:
         run: scripts/ci-gradle.sh checkModuleGraph
       - name: Build and test
         run: scripts/ci-gradle.sh build test
-      - name: Report generated Room schema (temporary bootstrap)
-        if: always()
-        run: |
-          f=data/schemas/app.aria.data.AriaDatabase/1.json
-          gzip -9c "$f" | base64 -w0 | fold -w 3000 | nl -w3 -nrz | while read -r n line; do echo "::error title=schema-$n::$line"; done
-          exit 0
