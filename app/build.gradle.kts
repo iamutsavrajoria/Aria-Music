@@ -48,12 +48,14 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
+        isCoreLibraryDesugaringEnabled = true // required by :innertube
     }
 }
 
 kotlin { jvmToolchain(21) }
 
 dependencies {
+    coreLibraryDesugaring(libs.desugaring)
     implementation(project(":domain"))
     implementation(project(":core"))
     implementation(project(":data"))
