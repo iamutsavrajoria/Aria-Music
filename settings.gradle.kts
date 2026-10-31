@@ -38,3 +38,4 @@ rootProject.name = "Aria"
 include(":core")
 include(":domain")
 include(":data")
+include(":designsystem")
