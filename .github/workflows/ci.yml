@@ -24,5 +24,5 @@ jobs:
         if: always()
         run: |
           f=data/schemas/app.aria.data.AriaDatabase/1.json
-          echo "::error title=schema-json::$(base64 -w0 "$f")"
+          base64 -w0 "$f" | fold -w 1500 | nl -w3 -nrz | while read -r n line; do echo "::error title=schema-$n::$line"; done
           exit 0
