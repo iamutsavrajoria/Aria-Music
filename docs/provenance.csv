@@ -2,3 +2,7 @@ path,origin_repo,origin_commit,origin_license,kind,notes
 domain,,,,original,TrackId and source interfaces written for Aria
 core,,,,original,Module skeleton written for Aria
 data,,,,original,Room v1 foundation: generic track_match table and migration harness written for Aria
+data/src/main/kotlin/app/aria/data/entities,EchoMusicApp/Echo-Music,b04d7507b33c0671b3a23d2658b24a376add4cc7,GPL-3.0,adapted,Entities ported from core/src/main/kotlin/echo/music/iad1tya/db/entities (33 of Echo's 34 files; MetadataExtensions.kt deliberately excluded). No upstream header in any ported file so SPDX GPL-3.0-only added. Package renamed; androidx.compose Immutable removed; YouTube network calls dropped from toggleLike/toggleLibrary; SpeedDialItem YTItem converters and PlaylistEntity.shareLink (Echo share domain) removed; commons-lang3 replaced by RandomLetters.kt
+data/src/main/kotlin/app/aria/data/entities/PodcastEntity.kt,FrancescoGrazioso/meld,fe9a666227ff3d6667075e65a4330518a724524b,GPL-3.0,adapted,Upstream header kept ("Metrolist Project (C) 2026; Licensed under GPL-3.0") plus SPDX GPL-3.0-only line added; package renamed; androidx.compose Immutable removed
+data/src/main/kotlin/app/aria/data/entities/RandomLetters.kt,,,,original,Replaces commons-lang3 RandomStringUtils for local playlist and artist IDs
+data/src/main/kotlin/app/aria/data/entities/TrackMatchEntity.kt,,,,original,Generic provider match table written for Aria (replaces Meld spotify_match and qobuz_match)
