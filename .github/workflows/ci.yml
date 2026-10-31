@@ -14,6 +14,8 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: No destructive migration
         run: scripts/check-no-destructive-migration.sh
+      - name: Backup rules and no analytics
+        run: scripts/check-backup-rules.sh
       - name: Build-logic tests
         run: scripts/ci-gradle.sh -p buildSrc test
       - name: Module graph
