@@ -1,0 +1,82 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "a277fb7d320d9f4e0c69729a2fb28d4e",
+    "entities": [
+      {
+        "tableName": "track_match",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`sourceProvider` TEXT NOT NULL, `sourceId` TEXT NOT NULL, `targetProvider` TEXT NOT NULL, `targetId` TEXT NOT NULL, `score` REAL NOT NULL, `isManualOverride` INTEGER NOT NULL DEFAULT 0, `cachedAt` INTEGER NOT NULL, PRIMARY KEY(`sourceProvider`, `sourceId`, `targetProvider`))",
+        "fields": [
+          {
+            "fieldPath": "sourceProvider",
+            "columnName": "sourceProvider",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sourceId",
+            "columnName": "sourceId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetProvider",
+            "columnName": "targetProvider",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "targetId",
+            "columnName": "targetId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "score",
+            "columnName": "score",
+            "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isManualOverride",
+            "columnName": "isManualOverride",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "cachedAt",
+            "columnName": "cachedAt",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "sourceProvider",
+            "sourceId",
+            "targetProvider"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_track_match_targetProvider_targetId",
+            "unique": false,
+            "columnNames": [
+              "targetProvider",
+              "targetId"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_track_match_targetProvider_targetId` ON `${TABLE_NAME}` (`targetProvider`, `targetId`)"
+          }
+        ]
+      }
+    ],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'a277fb7d320d9f4e0c69729a2fb28d4e')"
+    ]
+  }
+}

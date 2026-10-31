@@ -3,7 +3,7 @@ name: ci
 on:
   push: { branches: [main] }
   pull_request:
-permissions: { contents: write }
+permissions: { contents: read }
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -20,11 +20,3 @@ jobs:
         run: scripts/ci-gradle.sh checkModuleGraph
       - name: Build and test
         run: scripts/ci-gradle.sh build test
-      - name: Report generated Room schema (temporary bootstrap)
-        if: always()
-        run: |
-          out="$( { ls -R data/schemas; find . -name "*AriaDatabase*" -not -path "*/.git/*" | head -20; grep -n "schema" data/build.gradle.kts; } 2>&1 )"
-          echo "::error title=schema-info::$(printf '%s' "$out" | sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g')"
-          f=$(find data -path '*schemas*' -name '*.json' | head -1)
-          [ -n "$f" ] && echo "::error title=schema-json::$(base64 -w0 "$f")"
-          exit 0
