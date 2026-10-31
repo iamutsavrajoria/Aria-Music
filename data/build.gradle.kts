@@ -2,6 +2,7 @@
 plugins {
     id("com.android.library")
     alias(libs.plugins.kotlin.ksp)
+    alias(libs.plugins.androidx.room)
 }
 
 android {
@@ -25,7 +26,8 @@ androidComponents {
 
 kotlin { jvmToolchain(21) }
 
-ksp { arg("room.schemaLocation", "$projectDir/schemas") }
+// The Room Gradle plugin registers the schema directory as a tracked task output, so build-cache hits cannot skip the export.
+room { schemaDirectory("$projectDir/schemas") }
 
 dependencies {
     api(project(":domain"))
