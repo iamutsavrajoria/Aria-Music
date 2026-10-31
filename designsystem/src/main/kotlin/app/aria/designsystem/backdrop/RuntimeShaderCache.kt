@@ -7,9 +7,10 @@
  * scale for cheaper effect rendering. KMP expect/actual declarations were
  * merged into this single Android source set. Package renamed accordingly.
  */
-// Modified for Aria: package renamed.
+// Modified for Aria: package renamed; NewApi lint suppressed on RuntimeShader creation (glass effects only run when GlassResolver reports API 33+).
 package app.aria.designsystem.backdrop
 
+import android.annotation.SuppressLint
 import org.intellij.lang.annotations.Language
 
 sealed interface RuntimeShaderCache {
@@ -21,6 +22,7 @@ internal class RuntimeShaderCacheImpl : RuntimeShaderCache {
 
   private val runtimeShaders = mutableMapOf<String, RuntimeShader>()
 
+  @SuppressLint("NewApi") // callers only reach this on API 33+ (GlassResolver gates the effect)
   override fun obtainRuntimeShader(key: String, string: String): RuntimeShader {
     return runtimeShaders.getOrPut(key) { RuntimeShader(string) }
   }
