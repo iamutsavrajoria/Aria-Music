@@ -20,3 +20,9 @@ jobs:
         run: scripts/ci-gradle.sh checkModuleGraph
       - name: Build and test
         run: scripts/ci-gradle.sh build test
+      - name: Print generated Room schema (temporary bootstrap)
+        if: always()
+        run: |
+          f=$(ls data/schemas/app.aria.data.AriaDatabase/*.json | head -1)
+          echo "::notice title=schema-file::$f"
+          echo "::notice title=schema-json::$(sed ':a;N;$!ba;s/%/%25/g;s/\r/%0D/g;s/\n/%0A/g' "$f")"
