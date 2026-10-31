@@ -25,6 +25,11 @@ kotlin {
     jvmToolchain(21)
 }
 
+// Smoke tests only run with -PrunSmoke=true (nightly workflow); otherwise they skip via assumeTrue.
+tasks.withType<Test>().configureEach {
+    systemProperty("aria.smoke", providers.gradleProperty("runSmoke").orNull ?: "false")
+}
+
 dependencies {
     api(project(":domain"))
     if (providers.gradleProperty("useMavenLocalInnerTubeX").isPresent) {
@@ -39,6 +44,7 @@ dependencies {
     implementation(libs.ktor.client.encoding)
     implementation(libs.timber)
     testImplementation(libs.junit)
+    testImplementation(libs.coroutines.core)
 
     coreLibraryDesugaring(libs.desugaring)
 }

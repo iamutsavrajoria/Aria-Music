@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: GPL-3.0-only
+name: nightly-playback-smoke
+on:
+  schedule: [{ cron: "17 3 * * *" }]
+  workflow_dispatch:
+permissions: { contents: read, issues: write }
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with: { persist-credentials: false }
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with: { distribution: temurin, java-version: 21 }
+      - uses: gradle/actions/setup-gradle@748248ddd2a24f49513d8f472f81c3a07d4d50e1 # v4.4.4
+      - run: scripts/ci-gradle.sh :innertube:testDebugUnitTest -PrunSmoke=true --tests '*PlaybackSmokeTest'
+      - name: Fail if the smoke test was skipped instead of run
+        # assumeTrue skips silently when the property does not reach the test JVM; a skipped nightly must not look green.
+        run: |
+          f=$(ls innertube/build/test-results/testDebugUnitTest/*PlaybackSmokeTest.xml)
+          grep -q 'tests="1"' "$f" && grep -q 'skipped="0"' "$f" || { echo "Smoke test did not run:"; head -3 "$f"; exit 1; }
+      - name: Report failure (one open issue, not one per night)
+        if: failure()
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          gh label create smoke-failure --color B60205 --description "Nightly playback smoke test" 2>/dev/null || true
+          n=$(gh issue list --label smoke-failure --state open --json number --jq '.[0].number // empty')
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --body "Failed again ($(date -u +%F)): $run_url"
+          else
+            gh issue create --label smoke-failure --title "Nightly playback smoke test failed ($(date -u +%F))" \
+              --body "See run: $run_url. Note: YouTube may block datacenter IPs; if this fails every night with no code change, run the same command from the maintainer's machine on a schedule instead."
+          fi

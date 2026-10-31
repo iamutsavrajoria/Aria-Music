@@ -8,3 +8,5 @@ local.properties
 captures/
 .cxx/
 .internal/stress-tests/
+__pycache__/
+.pytest_cache/
