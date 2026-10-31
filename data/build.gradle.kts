@@ -19,7 +19,7 @@ android {
 androidComponents {
     onVariants { variant ->
         (variant as? com.android.build.api.variant.HasUnitTest)
-            ?.unitTest?.sources?.assets?.addStaticSources(listOf(layout.projectDirectory.dir("schemas")))
+            ?.unitTest?.sources?.assets?.addStaticSource(layout.projectDirectory.dir("schemas"))
     }
 }
 
