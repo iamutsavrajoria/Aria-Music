@@ -36,11 +36,11 @@ Reason for the split: Echo's `MusicService.kt` (5,594 lines, 219 imports) mixes 
 - **Queue and navigation.** List plus current index. Shuffle keeps a separate permutation: turning it off restores order, turning it on keeps the current track in place. Previous restarts the track if more than 3 s were played. Repeat: off, all, one.
 - **Stream URLs.** Resolve the current track's URL; resolve the next track's URL early. An expired URL (`expiresAtEpochMs`) is re-resolved before use. An HTTP 403 mid-play triggers one fresh resolve and retry.
 - **Errors (stress-test branch 6).** Failures are classified. *Permanent* (`StreamUnavailableException`, extractor "video unavailable"): skip immediately without retry, with the reason in `PlaybackEvent.Skipped`; it counts toward the stop rule. *Stale URL* (HTTP 403/410 or an expired URL): one fresh resolve, preferring a different client; if that also fails it is treated as transient. *Transient* (IO errors, timeouts, no connectivity): up to 3 retries with backoff 1 s, 2 s, 4 s (Echo retries 3 times at 1 s). When the device is offline the engine does not skip: it pauses in a `WaitingForNetwork` state and resumes when connectivity returns (network callback), so a tunnel cannot consume the queue. Only permanent failures and retries exhausted on a connected device count toward the stop rule: after 3 consecutive skipped tracks the engine stops in an error state, so a systematic failure cannot skip through the whole queue.
-- **History.** A play is recorded when leaving a track after at least 30 s of actual listening, through `PlayEventRepository`. Echo makes the threshold a user setting; Aria starts with a fixed 30 s.
-- **Resume.** Queue, current index and position are saved on pause, track change and app stop through `QueueStore` and restored on start, paused at the saved position.
-- **Endless radio.** When the last track starts and repeat is off, ask `RadioSource` for related songs and append them. A failure is silent and retried at the next track.
+- **History (stress-test branch 7).** A play is recorded once per track, at the 30 s mark of actual listening while the track is still playing (not on exit), through `PlayEventRepository`, so a later process kill does not lose it. Echo makes the threshold a user setting; Aria starts with a fixed 30 s.
+- **Resume and persistence (branch 7).** The queue structure (items and order) is saved through `QueueStore` only when it changes, in one transaction; the current index and position are saved separately on pause, on track change and every 15 s while playing, so process death loses at most 15 s of position. On start the queue is restored, paused at the saved position.
+- **Endless radio (branch 7).** When fewer than 5 tracks remain and repeat is off, ask `RadioSource` for related songs from the current track and append a batch of 25. The queue is capped at 500 items; at the cap, already-played tracks are dropped from the front. A failed fetch is silent and retried at the next track.
 - **Sleep timer.** A duration or "end of current track"; brief fade-out then pause. It survives screen-off, not an app kill.
-- **Skip silence and loudness.** Passed to the output as settings. Skip silence uses ExoPlayer's built-in processor. Loudness uses the loudness value in the stream response and applies a volume correction, with no correction when the value is missing.
+- **Skip silence and loudness (branch 7).** Passed to the output as settings. Skip silence uses ExoPlayer's built-in processor. Loudness normalization only attenuates: tracks louder than the reference are brought down using the loudness value in the stream response, quieter tracks are left alone, so it can never clip; no correction when the value is missing.
 
 ## 4. Stream resolution and providers
 
@@ -61,7 +61,7 @@ Follows the foundation's provider policy (Tier 2: unofficial, disclosed, switcha
 
 ## 6. Testing
 
-- **Engine (JVM):** fakes for `PlayerOutput`, `StreamSource`, `QueueStore`, `RadioSource`, `PlayEventRepository`, with virtual time. Cases: queue operations, shuffle round trip, repeat modes, previous-restart rule, URL expiry, 403 retry, error classification (permanent, stale URL, transient with backoff), offline wait and resume, 3-consecutive-skip stop, history threshold, resume round trip, radio top-up and its silent failure, sleep timer modes.
+- **Engine (JVM):** fakes for `PlayerOutput`, `StreamSource`, `QueueStore`, `RadioSource`, `PlayEventRepository`, with virtual time. Cases: queue operations, shuffle round trip, repeat modes, previous-restart rule, URL expiry, 403 retry, error classification (permanent, stale URL, transient with backoff), offline wait and resume, 3-consecutive-skip stop, history written once at 30 s, resume round trip with the 15 s position saves, radio top-up with batch size and the 500-item cap, silent radio failure, sleep timer modes, loudness attenuate-only.
 - **`QueueStore`:** Robolectric on SDK 35 (the `:data` setup).
 - **Extractor adapter:** mapping tests against fake extractor results (format choice, loudness, failed-client memory).
 - **Service (emulator, in the existing CI emulator job; stress-test branch 2):** lives in `:playback`'s `androidTest` with a custom `AndroidJUnitRunner` that swaps in a test `Application` implementing `PlaybackEngineProvider` with the real `DefaultPlaybackEngine` and fake source, store and radio. `:app` has a tiny androidTest only for the Hilt wiring (app starts, engine resolves). The service test uses a bundled local audio file served through a fake `StreamSource`; asserts position advances, the notification is posted, pause and next work from the session, the untrusted-controller check rejects an unknown package.
@@ -88,3 +88,19 @@ Follows the foundation's provider policy (Tier 2: unofficial, disclosed, switcha
 - InnerTubeX `-only` or `-or-later` variant, Kyant0 NOTICE, EPL-2.0 audit, name and trademark: unchanged release gates.
 - Dependency verification metadata: still needs the maintainer's workflow-permission change.
 - History threshold as a user setting, speed and pitch, crossfade: later sub-projects.
+
+## 10. Stress Test Results
+
+Run 2026-11-02, Mode A (edits applied inline). Seven branches, all agreed, all changed the spec. The mandatory security-and-risk branch is covered by branches 3, 4 and 5.
+
+| # | Branch | Finding | Change |
+|---|--------|---------|--------|
+| 1 | Source of truth | Feeding ExoPlayer only current and next would hide notification and Bluetooth next/previous and risk state drift | Engine owns order and content; player owns position and play state; full queue mirrored into ExoPlayer as lightweight items |
+| 2 | Service wiring | `:playback` has no Hilt, so "attach to the singleton" had no mechanism and the service test could not use fakes | `PlaybackEngineProvider` implemented by the Application; `:playback` androidTest with a test Application; tiny Hilt test in `:app` |
+| 3 | WebView security | Remote BotGuard script in an unconfined WebView is an attack surface | Hidden, origin-restricted WebView, one narrow validated bridge, no file access, destroyed after use, static CI check, data-flow note |
+| 4 | Cipher config trust | Repo-hosted config is writable by anyone with repo or token access and steers the extractor | Ed25519-signed, strictly validated updates; disabled until production keys exist; bundled default |
+| 5 | Debug APK vs name gate | A public pre-release would break the foundation's own release gate | Debug APKs as private Actions artifacts only; public pre-releases stay blocked |
+| 6 | Error handling | One retry policy for all failures wastes time on dead tracks and skips healthy ones offline | Classified errors, backoff, offline wait-and-resume |
+| 7 | Limits and persistence | Unbounded radio, per-change queue rewrites, loudness boost clipping, history lost on kill | 500-item cap with batch 25, structure saved on change and position every 15 s, attenuate-only loudness, history at the 30 s mark |
+
+Confidence: medium-high. Remaining concerns are external: PoToken and the extractor can break when YouTube changes, CI runner IPs may be blocked, and Media3 details are verified only by CI.
