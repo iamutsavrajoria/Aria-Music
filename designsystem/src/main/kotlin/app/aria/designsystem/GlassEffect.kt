@@ -1,4 +1,5 @@
 /** vivimusic Project (C) 2026 Licensed under GPL-3.0 | See git history for contributors */
+// SPDX-License-Identifier: GPL-3.0-only
 package app.aria.designsystem
 
 import android.os.Build

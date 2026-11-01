@@ -2,7 +2,6 @@
 package app.aria.innertube
 
 import app.aria.innertube.models.MediaInfo
-import app.aria.innertube.models.ReturnYouTubeDislikeResponse
 import app.aria.innertube.models.YouTubeClient
 import app.aria.innertube.models.YouTubeLocale
 import app.aria.innertube.models.response.NextResponse
@@ -15,23 +14,18 @@ import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.plugins.compression.ContentEncoding
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.defaultRequest
-import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.url
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsChannel
-import io.ktor.http.ContentType
-import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.utils.io.jvm.javaio.toByteReadChannel
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.json.Json
 import java.io.File
-import java.io.IOException
 import java.io.InputStream
 import java.net.Proxy
 import java.util.Locale
@@ -372,33 +366,6 @@ class InnerTube {
         return this
     }
 
-    private suspend fun returnYouTubeDislike(videoId: String) =
-        withRetry {
-            httpClient.get("https://returnyoutubedislikeapi.com/Votes?videoId=$videoId") {
-                contentType(ContentType.Application.Json)
-            }
-        }
-
-    private suspend fun <T> withRetry(
-        maxAttempts: Int = 3,
-        initialDelay: Long = 500L,
-        factor: Double = 2.0,
-        block: suspend () -> T,
-    ): T {
-        var currentDelay = initialDelay
-        var attempt = 0
-        while (true) {
-            try {
-                return block()
-            } catch (exception: IOException) {
-                attempt++
-                if (attempt >= maxAttempts) throw exception
-                delay(currentDelay)
-                currentDelay = (currentDelay * factor).toLong()
-            }
-        }
-    }
-
     suspend fun getMediaInfo(videoId: String): Result<MediaInfo> =
         runCatching {
             val response =
@@ -428,9 +395,6 @@ class InnerTube {
                     ?.find { it?.videoPrimaryInfoRenderer != null }
                     ?.videoPrimaryInfoRenderer
 
-            val returnYouTubeDislikeResponse =
-                returnYouTubeDislike(videoId).body<ReturnYouTubeDislikeResponse>()
-
             MediaInfo(
                 videoId = videoId,
                 title = baseForTitle?.title?.runs?.firstOrNull()?.text,
@@ -448,9 +412,6 @@ class InnerTube {
                 description = baseForInfo?.attributedDescription?.content,
                 subscribers = baseForInfo?.owner?.videoOwnerRenderer?.subscriberCountText?.simpleText?.split(" ")?.firstOrNull(),
                 uploadDate = baseForTitle?.dateText?.simpleText,
-                viewCount = returnYouTubeDislikeResponse.viewCount,
-                like = returnYouTubeDislikeResponse.likes,
-                dislike = returnYouTubeDislikeResponse.dislikes,
             )
         }
 }
