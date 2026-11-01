@@ -1,5 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Privacy-preserving default: nothing private leaves the device through Android backup.
+  Excluded: the encrypted token store, the Room database (with its -wal/-shm/-journal side files), the resume
+  preferences and crash reports. The foundation spec plans a user-controlled backup and restore of library and
+  settings (sub-project 6); that feature replaces this blanket exclusion for the library. Until it exists, these
+  rules stay as they are. scripts/check-backup-rules.sh fails if any exclusion is missing.
+-->
 <full-backup-content>
     <exclude domain="file" path="secure/" />
     <exclude domain="sharedpref" path="secure.xml" />
+    <exclude domain="database" path="aria.db" />
+    <exclude domain="database" path="aria.db-wal" />
+    <exclude domain="database" path="aria.db-shm" />
+    <exclude domain="database" path="aria.db-journal" />
+    <exclude domain="sharedpref" path="resume.xml" />
+    <exclude domain="file" path="crash/" />
 </full-backup-content>
