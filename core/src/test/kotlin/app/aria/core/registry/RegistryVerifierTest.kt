@@ -93,9 +93,48 @@ class RegistryVerifierTest {
         assertTrue(verifier().verify(p, sign(p)) is VerifyResult.Invalid)
     }
 
-    @Test fun oversizedPayloadIsRejected() {
-        val big = ByteArray(65 * 1024) { 'x'.code.toByte() }
-        assertTrue(verifier().verify(big, sign(big)) is VerifyResult.Invalid)
+    /** A valid registry whose trailing whitespace pads it to exactly [size] bytes; JSON allows that whitespace. */
+    private fun paddedTo(size: Int): ByteArray {
+        val base = json()
+        return base + ByteArray(size - base.size) { ' '.code.toByte() }
+    }
+
+    @Test fun validSignedRegistryOverTheSizeLimitIsRejectedForSize() {
+        val p = paddedTo(64 * 1024 + 1)
+        val r = verifier().verify(p, sign(p))
+        assertTrue(r is VerifyResult.Invalid)
+        assertTrue((r as VerifyResult.Invalid).reason, r.reason.startsWith("payload larger than"))
+    }
+
+    @Test fun sameRegistryExactlyAtTheSizeLimitIsAccepted() {
+        val p = paddedTo(64 * 1024)
+        assertTrue(verifier().verify(p, sign(p)) is VerifyResult.Valid)
+    }
+
+    @Test fun oversizedPayloadWithLongStringInAllowedFieldIsRejectedForSize() {
+        val p = json(client = "A".repeat(65 * 1024))
+        val r = verifier().verify(p, sign(p))
+        assertTrue(r is VerifyResult.Invalid)
+        assertTrue((r as VerifyResult.Invalid).reason, r.reason.startsWith("payload larger than"))
+    }
+
+    @Test fun signedPayloadWithUnknownTopLevelKeyIsRejected() {
+        val p = """{"issuedAtEpochMs":$now,"surprise":true}""".toByteArray()
+        val r = verifier().verify(p, sign(p))
+        assertTrue(r is VerifyResult.Invalid)
+        assertTrue((r as VerifyResult.Invalid).reason, r.reason.startsWith("malformed registry"))
+    }
+
+    @Test fun signedPayloadWithUnknownNestedKeyIsRejected() {
+        val p = """{"issuedAtEpochMs":$now,"operations":{"searchDesktop":{"hash":"$hash64","extra":1}}}""".toByteArray()
+        val r = verifier().verify(p, sign(p))
+        assertTrue(r is VerifyResult.Invalid)
+        assertTrue((r as VerifyResult.Invalid).reason, r.reason.startsWith("malformed registry"))
+    }
+
+    @Test fun controlPayloadWithoutExtraKeyIsValid() {
+        val p = """{"issuedAtEpochMs":$now}""".toByteArray()
+        assertTrue(verifier().verify(p, sign(p)) is VerifyResult.Valid)
     }
 
     @Test fun malformedJsonIsRejected() {
