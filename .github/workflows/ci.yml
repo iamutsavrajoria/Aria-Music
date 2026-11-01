@@ -47,15 +47,7 @@ jobs:
         if: failure()
         run: |
           f=build/reports/dependency-license/dependencies-without-allowed-license.json
-          [ -f "$f" ] && echo "::error title=license-names::$(python3 -c "
-import json,sys,collections
-d=json.load(open('$f'))
-c=collections.defaultdict(list)
-for dep in d.get('dependencies',[]):
-    names=tuple(sorted({l.get('license_name') or l.get('moduleLicense') or '?' for l in (dep.get('licenses') or [])} | {l.get('moduleLicense') or '?' for l in (dep.get('moduleLicenses') or [])}))
-    c[names].append(dep.get('moduleName') or dep.get('moduleGroup'))
-print(' || '.join('%s: %d e.g. %s' % (k,len(v),v[:2]) for k,v in c.items()))
-" | sed 's/%/%25/g')"
+          if [ -f "$f" ]; then echo "::error title=license-names::$(python3 scripts/license-names.py "$f" | sed 's/%/%25/g')"; fi
           exit 0
   # UNVERIFIED locally (no emulator available when this job was written): first CI run is its real test.
   glass-ui:
