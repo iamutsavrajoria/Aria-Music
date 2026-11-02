@@ -8,7 +8,7 @@ Sub-project 2 ports Meld's extractor-based stream resolution, which needs a WebV
 ## Decision
 1. The WebView runs hidden, origin-restricted, with one narrow validated JS bridge, no file access, and is destroyed after use; a static CI check enforces this.
 2. Cipher player configs are hosted by Aria, Ed25519-signed and strictly validated, using the existing signed-registry verifier. Remote updates stay disabled until production keys exist; a bundled default is used meanwhile.
-3. Pre-release builds are debug APKs kept as private Actions artifacts. No public release until the name/trademark and other release gates clear.
+3. Pre-release builds are debug APKs from a manual workflow, kept 1 day. The repo is public, so these artifacts are downloadable by anyone signed in to GitHub; treat them as public and share nothing before the release gates clear. No GitHub release until the name/trademark and other gates clear.
 
 ## Rationale
 An unconfined WebView running remote script, or an unsigned config in a repo anyone with a token can write to, would let a single compromise change what every user's app executes or fetches. Reusing the registry verifier avoids new crypto.

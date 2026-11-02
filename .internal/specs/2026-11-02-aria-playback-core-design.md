@@ -71,7 +71,7 @@ Follows the foundation's provider policy (Tier 2: unofficial, disclosed, switcha
 ## 7. Definition of done
 
 1. All CI jobs green on `main` (verify, glass-ui matrix, plus the service emulator test).
-2. A workflow builds the debug APKs (foss and gms) and uploads them as GitHub Actions artifacts (30 days, named with the commit SHA; visible only to people with repo access) so the maintainer can install them. It does **not** publish a GitHub release: the repo is public, and the foundation gates require the final name, trademark check, package ID and (for a build containing unofficial YouTube paths) a kill switch before any public build. Public pre-releases stay blocked behind `docs/release-gates.md`. (Stress-test branch 5.)
+2. A manually dispatched workflow builds the debug APKs (foss and gms) and uploads them from a manual workflow as GitHub Actions artifacts (1 day, named with the commit SHA; on a public repo they are downloadable by anyone signed in to GitHub, so the maintainer downloads and deletes them at once) so the maintainer can install them. It does **not** publish a GitHub release: the repo is public, and the foundation gates require the final name, trademark check, package ID and (for a build containing unofficial YouTube paths) a kill switch before any public build. Public pre-releases stay blocked behind `docs/release-gates.md`. (Stress-test branch 5.)
 3. Docs updated: provider record, data-flow, ledger rows for every ported file, release gates.
 4. The skeleton's `PlaybackHost` and delay are gone; no `TODO(sub-project 2)` remains.
 5. The PoToken release gate closes only after the maintainer confirms real playback on a device; until then it stays open.

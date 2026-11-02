@@ -19,9 +19,11 @@
 - No third-party endpoints except YouTube. No Firebase/analytics. Cleartext traffic stays off. Release builds log no tokens, URLs with query strings, cookies or IPs.
 - `aria.db` is excluded from backup; Room schema is not frozen until first beta (version stays 1; the committed `data/schemas/.../1.json` must be regenerated and committed when entities change).
 - Engine rules: all engine methods run on one dispatcher (main in production). Engine never imports Android or Media3.
-- Debug APKs are private Actions artifacts only; no GitHub release (ADR-0002, release gates).
+- Debug APKs are built by a manual workflow only, kept 1 day, and treated as public (the repo is public); no GitHub release (ADR-0002, release gates).
 - Cipher-config updates stay **disabled** until production keys exist.
 - No `TODO(sub-project 2)` may remain at the end.
+
+- **CI iteration policy (stress-test branch 7).** Read the library source (pinned tag) or the Task 0 spike before using a third-party API; do not guess. At most 4 push-and-fix CI rounds per task, then stop and report the failing annotations and what was tried. On failure change production code only: never weaken, skip or baseline a test, lint rule, `checkModuleGraph`, the license check or `scripts/check-webview-safety.sh` to get green (a test expectation that is itself wrong may be fixed, and the commit message says so).
 
 ## File Structure
 
@@ -40,8 +42,31 @@ innertube/.../cipher/ (AriaPlayerConfigRepository, CipherConfigUpdater); core/..
 innertube/.../potoken/ (ported, confined)
 app/.../ AriaApp, di/AppModule, PlayerScreen, ConnectivityNetworkMonitor
 scripts/check-webview-safety.sh (+ pytest), .github/workflows/debug-apk.yml, ci.yml (service job)
-docs/ provider record, data-flow, release-gates, manual-device-checklist.md
+docs/ spikes/2026-11-playback-apis.md (Task 0), provider record, data-flow, release-gates, manual-device-checklist.md
 ```
+
+---
+
+### Task 0: Research spike (no production code)
+
+Stress-test branch 4. Three unknowns sit mid-plan: the cipher-config license, third-party API shapes, and Media3 signatures. Settle them first so a blocker appears before code is written and Tasks 7 to 11 stop guessing. Needs WebFetch (raw GitHub is blocked from the shell); read pages, do not retype from memory.
+
+**Files:**
+- Create: `docs/spikes/2026-11-playback-apis.md`
+- Modify: `docs/spikes/2026-10-innertubex.md` (record the `-only`/`-or-later` answer in item 1), `docs/release-gates.md` (tick the InnerTubeX line only if the variant is confirmed)
+
+**Acceptance Criteria:**
+- `docs/spikes/2026-11-playback-apis.md` contains, each with its source URL and the commit or tag read:
+  1. The LICENSE of `ZemerTeam/zemer-cipher` (quote the license name and the relevant lines), and whether InnerTubeX v0.5.2 already embeds a default player config (file and class where it lives). Conclusion: one of "use embedded default", "bundle ZemerTeam file (license compatible)", "BLOCKED: ask the maintainer".
+  2. The InnerTubeX v0.5.2 declarations Tasks 9 and 10 use, copied as code: `PlayerConfigRepository` (every member), `RemotePlayerConfigStore` and `YouTubeCipherService` constructors, `YtConfigParserImpl` constructor and `withEmbeddedConfigFallback`, `InnerTubeExtractor` constructor and `extract(...)` parameters, `ExtractedStream` fields, `StreamResolveException` and its kind enum, `TokenProvider`, `TokenProviderCapabilities`, `PoTokenResult`, `PoTokenProviderKind`, `generateClientPlaybackNonce`, and whether the extractor accepts a null or absent token provider.
+  3. The Media3 1.10.1 declarations Tasks 7 and 8 use: `MediaSession.Callback.onConnect`, `ControllerInfo.isTrusted`, `MediaSession.isMediaNotificationController`, `MediaSession.ConnectionResult.reject()/AcceptedResultBuilder`, `ResolvingDataSource.Factory` and `Resolver`, `DefaultMediaSourceFactory(DataSource.Factory)`, `ForwardingPlayer` members to override, `MediaMetadata.Builder` setters used, and which of these need `@OptIn(UnstableApi::class)`.
+  4. The five Meld `potoken/` files at commit `fe9a666227ff3d6667075e65a4330518a724524b`: path, line count, header text, and the hosts the JavaScript contacts (input for `NavigationPolicy`).
+  5. The Meld license text relevant to those files and to `InnerTubeXPlayer.kt`.
+- Any "BLOCKED" conclusion is reported to the controller immediately, before Task 1 starts.
+
+- [ ] **Step 1:** Read each source with WebFetch (GitHub file pages or rendered source; for Media3 use `developer.android.com/reference/androidx/media3/...` and the `androidx/media` GitHub tag `1.10.1`). Copy declarations verbatim into the spike doc.
+- [ ] **Step 2:** Write the conclusions section (one paragraph per item above plus a "Plan changes needed" list; if a declaration differs from what Tasks 7 to 11 show, list the exact edits).
+- [ ] **Step 3:** Commit `docs(spike): playback API and license findings`. No CI wait needed beyond the docs checks (`verify` must stay green).
 
 ---
 
@@ -272,7 +297,7 @@ interface QueueStore {
 
 **Interfaces:**
 - Consumes: Task 1 contracts.
-- Produces: `internal class QueueModel(random)` and `class DefaultPlaybackEngine(streams, store, radio, history, network, dispatcher, clock, random) : PlaybackEngine, PlayerListener` with `attach(PlayerOutput)`, `detach(PlayerOutput)`, `release()`. Later tasks add members inside this class; the hooks `onCurrentChanged()` and `onStructureChanged()` exist from this task.
+- Produces: `internal class QueueModel(random)` and `class DefaultPlaybackEngine(streams, store, radio, history, network, dispatcher, clock, random, workDispatcher) : PlaybackEngine, PlayerListener` with `attach(PlayerOutput)`, `detach(PlayerOutput)`, `release()`. Later tasks add members inside this class; the hooks `onCurrentChanged()` and `onStructureChanged()` exist from this task.
 
 **Acceptance Criteria:**
 - playNow / playNext / addToEnd / removeAt / move / clear / skipTo behave per tests and mirror to the output.
@@ -392,9 +417,11 @@ class FakeOutput : PlayerOutput {
 class FakeStreams : StreamSource {
     val results = mutableMapOf<TrackId, Result<ResolvedStream>>()
     val resolved = mutableListOf<TrackId>(); val rejected = mutableListOf<TrackId>()
-    var nowProvider: () -> Long = { 0L }
+    var hang = false; var delayMs = 0L
     override suspend fun resolve(id: TrackId): Result<ResolvedStream> {
         resolved += id
+        if (hang) kotlinx.coroutines.awaitCancellation()
+        if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
         return results[id] ?: Result.success(ResolvedStream("https://example.invalid/${id.raw}", "audio/webm", 160_000, null, null))
     }
     override fun markRejected(id: TrackId) { rejected += id }
@@ -429,7 +456,8 @@ class Harness(val scheduler: TestCoroutineScheduler) {
     val output = FakeOutput(); val streams = FakeStreams(); val store = FakeStore()
     val radio = FakeRadio(); val history = FakeHistory(); val network = FakeNetwork()
     var now = 1_000_000L
-    val engine = DefaultPlaybackEngine(streams, store, radio, history, network, StandardTestDispatcher(scheduler), { now }, Random(1))
+    private val dispatcher = StandardTestDispatcher(scheduler)
+    val engine = DefaultPlaybackEngine(streams, store, radio, history, network, dispatcher, { now }, Random(1), dispatcher)
     fun attach(): Harness { engine.attach(output); return this }
     fun advance(ms: Long) { now += ms; scheduler.advanceTimeBy(ms); scheduler.runCurrent() }
     fun settle() = scheduler.runCurrent()
@@ -676,6 +704,8 @@ class DefaultPlaybackEngine(
     dispatcher: CoroutineDispatcher,
     private val clock: () -> Long = System::currentTimeMillis,
     random: Random = Random.Default,
+    /** Where stream resolution runs (CPU-heavy cipher work stays off the main thread). Tests pass the test dispatcher. */
+    private val workDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) : PlaybackEngine, PlayerListener {
     private val scope = CoroutineScope(SupervisorJob() + dispatcher)
     internal val model = QueueModel(random)
@@ -891,7 +921,7 @@ class DefaultPlaybackEngine(
 
 > The five `{ /* Task 5 */ }` bodies are intentional: Task 5 owns them and its tests fail until it replaces them. They are not left in the final tree (Task 5 acceptance).
 
-- [ ] **Step 4:** Push; `:playback:test` green for `QueueModelTest` and `EngineQueueTest`. The old `PlayerControllerTest` still passes (old code untouched until Task 7). Expected: PASS. Fix code, not tests, on mismatch; if a test expectation is itself wrong (for example the Harness index math), fix the test and say so in the commit message.
+- [ ] **Step 4:** Push; `:playback:test` green for `QueueModelTest` and `EngineQueueTest`. The old `PlayerControllerTest` still passes (old code untouched until Task 8). Expected: PASS. Fix code, not tests, on mismatch; if a test expectation is itself wrong (for example the Harness index math), fix the test and say so in the commit message.
 - [ ] **Step 5: Commit** `feat(playback): queue model and engine core`.
 
 ### Task 3: Engine stream URLs and error handling
@@ -906,6 +936,7 @@ class DefaultPlaybackEngine(
 
 **Acceptance Criteria:**
 - A resolved URL is cached; an expired one (within 60 s of `expiresAtEpochMs`) is re-resolved.
+- (Stress-test branch 3) Resolution is bounded: `streamFor` fails with an `IOException` (transient) after 20 s, and concurrent requests for the same track share one in-flight resolve, so prefetch and the loader thread never start two extractor runs.
 - The current and next tracks' URLs are resolved when the current track changes.
 - `PlayerError.Permanent`: skip immediately, no retry, `PlaybackEvent.Skipped` emitted.
 - `Http(403|410)`: one refresh (`markRejected`, cache dropped, `retry`); a second one is treated as transient.
@@ -933,6 +964,21 @@ class EngineErrorsTest {
         h.now += 100_000  // inside the 60 s margin of expiry
         h.engine.streamFor(id)
         assertEquals(2, h.streams.resolved.count { it == id })
+        h.release()
+    }
+    @Test fun hungResolveTimesOutAsTransientFailure() = runTest {
+        val h = Harness(testScheduler).attach(); h.streams.hang = true
+        val result = async { h.engine.streamFor(track(1).id) }
+        h.advance(19_999); assertFalse(result.isCompleted)
+        h.advance(2); assertTrue(result.await().exceptionOrNull() is java.io.IOException)
+        h.release()
+    }
+    @Test fun concurrentRequestsShareOneResolve() = runTest {
+        val h = Harness(testScheduler).attach(); h.streams.delayMs = 1_000; val id = track(1).id
+        val a = async { h.engine.streamFor(id) }; val b = async { h.engine.streamFor(id) }
+        h.advance(1_000)
+        assertTrue(a.await().isSuccess && b.await().isSuccess)
+        assertEquals(1, h.streams.resolved.count { it == id })
         h.release()
     }
     @Test fun currentAndNextAreResolvedOnTrackChange() = runTest {
@@ -994,7 +1040,7 @@ class EngineErrorsTest {
 }
 ```
 
-(Add `import kotlinx.coroutines.flow.toList` and `import kotlinx.coroutines.launch` at the top.)
+(Add `import kotlinx.coroutines.flow.toList`, `import kotlinx.coroutines.launch` and `import kotlinx.coroutines.async` at the top.)
 
 - [ ] **Step 2:** Push. Expected: FAIL (`streamFor` missing; `onError` sets a generic error).
 
@@ -1008,10 +1054,26 @@ class EngineErrorsTest {
     private var refreshTried = false
     private var retryJob: Job? = null
 
-    /** Thread-safe: also called from ExoPlayer's loader thread by the Media3 adapter. */
+    private val inFlight = ConcurrentHashMap<TrackId, Deferred<Result<ResolvedStream>>>()
+
+    /**
+     * Thread-safe: also called from ExoPlayer's loader thread by the Media3 adapter. Bounded by [RESOLVE_TIMEOUT_MS]
+     * and de-duplicated per track (prefetch and the loader share one resolve). A timeout is an ordinary IOException,
+     * so the engine retries it as transient.
+     */
     suspend fun streamFor(id: TrackId): Result<ResolvedStream> {
         resolved[id]?.takeIf { !it.isExpired() }?.let { return Result.success(it) }
-        return streams.resolve(id).onSuccess { resolved[id] = it }
+        val job = inFlight.computeIfAbsent(id) { scope.async(workDispatcher, CoroutineStart.LAZY) { resolveBounded(id) } }
+        return try { job.await() } finally { inFlight.remove(id, job) }
+    }
+
+    private suspend fun resolveBounded(id: TrackId): Result<ResolvedStream> {
+        val result = try {
+            withTimeoutOrNull(RESOLVE_TIMEOUT_MS) { streams.resolve(id) }
+                ?: Result.failure(java.io.IOException("Stream resolution timed out"))
+        } catch (e: CancellationException) { throw e } catch (e: Exception) { Result.failure(e) }
+        result.onSuccess { resolved[id] = it }
+        return result
     }
 
     private fun ResolvedStream.isExpired(): Boolean {
@@ -1090,7 +1152,7 @@ class EngineErrorsTest {
     }
 ```
 
-Add to the `companion object`: `const val EXPIRY_MARGIN_MS = 60_000L`, `const val MAX_CONSECUTIVE_FAILURES = 3`, `val BACKOFF_MS = longArrayOf(1_000, 2_000, 4_000)`. In `play()` the error branch must also reset: `consecutiveFailures = 0`.
+Add to the `companion object`: `const val RESOLVE_TIMEOUT_MS = 20_000L`, `const val EXPIRY_MARGIN_MS = 60_000L`, `const val MAX_CONSECUTIVE_FAILURES = 3`, `val BACKOFF_MS = longArrayOf(1_000, 2_000, 4_000)`. In `play()` the error branch must also reset: `consecutiveFailures = 0`.
 
 - [ ] **Step 4:** Push; `:playback:test` green (Task 2 tests still pass). Expected: PASS.
 - [ ] **Step 5: Commit** `feat(playback): stream URL cache and classified error handling`.
@@ -1459,7 +1521,7 @@ Replace the five placeholder methods and add helpers:
     }
 ```
 
-Hook edits: `onCurrentChanged` (end, before `publish()`) adds `applyVolume(); maybeTopUp()`. `streamFor` after `onSuccess { resolved[id] = it }` also `if (id == model.current?.track?.id) scope.launch { applyVolume() }`. `setRepeat` adds `maybeTopUp()`. `onItemTransition` after `onCurrentChanged()` adds `applyEndOfTrackSleep(index)`. `onEnded`: first line `sleepEndOfTrack = false; sleepTimer = null`. Companion: `RADIO_TRIGGER = 5`, `RADIO_BATCH = 25`, `QUEUE_CAP = 500`, `FADE_MS = 5_000L`, `FADE_STEPS = 20`, `MIN_GAIN = 0.1f`.
+Hook edits: `onCurrentChanged` (end, before `publish()`) adds `applyVolume(); maybeTopUp()`. `resolveBounded` after `result.onSuccess { resolved[id] = it }` also `if (id == model.current?.track?.id) scope.launch { applyVolume() }` (that launch runs on the engine dispatcher, so the volume is applied on the main thread). `setRepeat` adds `maybeTopUp()`. `onItemTransition` after `onCurrentChanged()` adds `applyEndOfTrackSleep(index)`. `onEnded`: first line `sleepEndOfTrack = false; sleepTimer = null`. Companion: `RADIO_TRIGGER = 5`, `RADIO_BATCH = 25`, `QUEUE_CAP = 500`, `FADE_MS = 5_000L`, `FADE_STEPS = 20`, `MIN_GAIN = 0.1f`.
 
 - [ ] **Step 4:** Push; all engine tests green. Expected: PASS. Then `grep -n "Task 5" playback/src/main` returns nothing.
 - [ ] **Step 5: Commit** `feat(playback): endless radio, sleep timer, skip silence, loudness`.
@@ -1670,25 +1732,22 @@ Resolve `<SHA>` for a current `actions/upload-artifact` release with `env -u GH_
 
 ---
 
-### Task 7: Media3 adapter and service (replaces the skeleton player)
+### Task 7: Trust, stream-URL and error policies (pure `:playback` code)
 
 **Files:**
-- Create: `playback/src/main/kotlin/app/aria/playback/{PlaybackEngineProvider,TrustPolicy,PlayerErrorMapper,Media3PlayerOutput,EngineForwardingPlayer}.kt`
-- Modify: `playback/src/main/kotlin/app/aria/playback/AriaPlaybackService.kt`, `playback/build.gradle.kts`, `playback/src/main/AndroidManifest.xml` (unchanged unless CI complains)
-- Delete: `PlayerController.kt`, `ResumeStore.kt` (both classes `ResumeStore` and `InMemoryResumeStore`), `PlayerControllerTest.kt`, and the `PlaybackHost` object
-- Test: `playback/src/test/kotlin/app/aria/playback/TrustPolicyTest.kt`, `PlayerErrorMapperTest.kt`, `playback/src/test/resources/robolectric.properties` (`sdk=35`)
+- Create: `playback/src/main/kotlin/app/aria/playback/{PlaybackEngineProvider,TrustPolicy,StreamUrlPolicy,PlayerErrorMapper}.kt`
+- Modify: `playback/build.gradle.kts`
+- Test: `playback/src/test/kotlin/app/aria/playback/TrustPolicyTest.kt`, `StreamUrlPolicyTest.kt`, `PlayerErrorMapperTest.kt`, `playback/src/test/resources/robolectric.properties` (`sdk=35`)
 
 **Interfaces:**
-- Consumes: `DefaultPlaybackEngine.attach/detach/streamFor`, `PlayerOutput`, `PlayerListener`, `PlayerError`.
-- Produces: `interface PlaybackEngineProvider { val playbackEngine: DefaultPlaybackEngine }` (implemented by the `Application`), `object TrustPolicy { fun isAllowed(...): Boolean }`, `PlayerErrorMapper.map(Throwable): PlayerError`, `class PermanentStreamException`, `AriaPlaybackService.start(context)`.
-- **:app is broken between this task and Task 11** (it still imports `PlaybackHost`). Do Tasks 7 and 11 on one branch and push after Task 11, or keep a temporary shim: leave `SkeletonScreen.kt` compiling by deleting it in this task and making `MainActivity` show a plain `Text`. Prefer the shim (CI stays green per task).
+- Consumes: `PlayerError` (Task 1), `DefaultPlaybackEngine` (type only), and the Media3 declarations in `docs/spikes/2026-11-playback-apis.md` item 3 (**use the spike's signatures wherever they differ from the code below**).
+- Produces: `interface PlaybackEngineProvider { val playbackEngine: DefaultPlaybackEngine; val allowLocalStreams: Boolean get() = false }` (implemented by the `Application`; only the emulator test app overrides the flag), `object StreamUrlPolicy { fun isAllowed(url: String, allowLocal: Boolean): Boolean }`, `object TrustPolicy { fun isAllowed(...): Boolean }`, `PlayerErrorMapper.map(Throwable): PlayerError`, `class PermanentStreamException`.
+- Nothing in `:app` changes, so CI stays green; the old skeleton player is untouched until Task 8.
 
 **Acceptance Criteria:**
 - A same-package controller, the system, the media-notification controller and a trusted controller are accepted; any other package is rejected (`TrustPolicy`).
+- `StreamUrlPolicy` (stress-test branch 2, security): only `https` URLs with a non-empty host are allowed; `http`, `file`, `content`, `asset`, `rawresource`, `data`, `javascript` and malformed URLs are rejected; with `allowLocal = true` (emulator test only) `file` is also allowed.
 - `PlayerErrorMapper`: cause chain containing `PermanentStreamException` maps to `Permanent`; `HttpDataSource.InvalidResponseCodeException` to `Http(code)`; anything else to `Io`.
-- ExoPlayer is built with audio focus handling, becoming-noisy pause, network wake mode; stream URLs are resolved through `ResolvingDataSource` using `engine.streamFor`.
-- Notification/Bluetooth/session play, pause, next, previous and seeks go to the engine (`EngineForwardingPlayer`).
-- `PlaybackHost`, `PlayerController`, the 500 ms delay and every `TODO(sub-project 2)` in `:playback` are gone.
 
 - [ ] **Step 1: Failing tests.**
 
@@ -1709,6 +1768,29 @@ class TrustPolicyTest {
     @Test fun notificationControllerIsAllowed() = assertTrue(allowed("androidx.media3.session", notification = true))
     @Test fun unknownPackageIsRejected() = assertFalse(allowed("com.evil.app"))
     @Test fun lookAlikePackageIsRejected() = assertFalse(allowed("app.aria.music.evil"))
+}
+```
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.playback
+
+import kotlin.test.Test
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+
+class StreamUrlPolicyTest {
+    @Test fun httpsWithHostIsAllowed() = assertTrue(StreamUrlPolicy.isAllowed("https://rr1---sn.googlevideo.com/videoplayback?x=1", allowLocal = false))
+    @Test fun everythingElseIsRejected() {
+        listOf("http://a.example/x", "file:///data/data/app/aria.db", "content://contacts/people", "asset:///x", "rawresource:///1",
+            "data:audio/wav;base64,AAAA", "javascript:alert(1)", "https:///nohost", "not a url", "").forEach {
+            assertFalse(StreamUrlPolicy.isAllowed(it, allowLocal = false), it)
+        }
+    }
+    @Test fun localFilesOnlyWhenExplicitlyAllowed() {
+        assertTrue(StreamUrlPolicy.isAllowed("file:///data/user/0/x/cache/silence.wav", allowLocal = true))
+        assertFalse(StreamUrlPolicy.isAllowed("content://x/y", allowLocal = true))
+    }
 }
 ```
 
@@ -1751,7 +1833,31 @@ class PlayerErrorMapperTest {
 package app.aria.playback
 
 /** Implemented by the Application. No DI framework in :playback: the service asks the Application for the engine. */
-interface PlaybackEngineProvider { val playbackEngine: DefaultPlaybackEngine }
+interface PlaybackEngineProvider {
+    val playbackEngine: DefaultPlaybackEngine
+    /** Only the emulator test app returns true (it serves a local WAV). Production never plays local URLs. */
+    val allowLocalStreams: Boolean get() = false
+}
+```
+
+```kotlin
+// StreamUrlPolicy.kt
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.playback
+
+import java.net.URI
+
+/** A resolved stream URL comes from parsed remote data; DefaultDataSource would also read file:, content: and asset: URIs, so only https may pass. */
+object StreamUrlPolicy {
+    fun isAllowed(url: String, allowLocal: Boolean): Boolean {
+        val uri = try { URI(url) } catch (_: Exception) { return false }
+        return when (uri.scheme?.lowercase()) {
+            "https" -> !uri.host.isNullOrEmpty()
+            "file" -> allowLocal
+            else -> false
+        }
+    }
+}
 ```
 
 ```kotlin
@@ -1791,6 +1897,34 @@ object PlayerErrorMapper {
 }
 ```
 
+- [ ] **Step 4:** Push; `:playback:test` green for the three new tests. Fix API-name mismatches reported by CI **(verify: `HttpDataSource.InvalidResponseCodeException.responseCode`)**. Expected: PASS.
+- [ ] **Step 5: Commit** `feat(playback): trust, stream-url and error-mapping policies`.
+
+---
+
+### Task 8: Media3 output, service and minimal app wiring (replaces the skeleton player)
+
+**Files:**
+- Create: `playback/src/main/kotlin/app/aria/playback/{Media3PlayerOutput,EngineForwardingPlayer}.kt`, `app/src/main/kotlin/app/aria/music/ConnectivityNetworkMonitor.kt`
+- Modify: `playback/src/main/kotlin/app/aria/playback/AriaPlaybackService.kt`, `app/src/main/kotlin/app/aria/music/{AriaApp,MainActivity}.kt`, `app/src/main/kotlin/app/aria/music/di/AppModule.kt`, `app/src/main/AndroidManifest.xml`, `playback/build.gradle.kts` (only if CI cannot see `ResolvingDataSource`)
+- Delete: `PlayerController.kt`, `ResumeStore.kt` (both `ResumeStore` and `InMemoryResumeStore`), `PlayerControllerTest.kt`, the `PlaybackHost` object, `app/.../SkeletonScreen.kt`, `app/.../SharedPrefsResumeStore.kt`
+
+**Interfaces:**
+- Consumes: Task 7 policies, `DefaultPlaybackEngine.attach/detach/streamFor`, `PlayerOutput`, `PlayerListener`, `PlaybackEngine`, `QueueStore` (Task 6), and the spike's Media3 signatures.
+- Produces: `Media3PlayerOutput`, `EngineForwardingPlayer`, `AriaPlaybackService.start(context)`, the engine as a Hilt singleton bound as both `DefaultPlaybackEngine` and `PlaybackEngine`, `AriaApp : PlaybackEngineProvider`, and a minimal real `MainActivity` (search, tap a result to play, now-playing line with play/pause). No `:app` shim: the activity uses the real engine from this task on, and Task 12 replaces its content with `PlayerScreen`.
+
+**Acceptance Criteria:**
+- ExoPlayer is built with audio focus handling, becoming-noisy pause and network wake mode; stream URLs are resolved through `ResolvingDataSource` using `engine.streamFor`; `Media3PlayerOutput.resolve()` throws `PermanentStreamException("unsupported stream scheme")` for a URL `StreamUrlPolicy` rejects, so the engine skips the track.
+- Notification, Bluetooth and session play, pause, next, previous and seeks go to the engine (`EngineForwardingPlayer`); the session callback uses `TrustPolicy`.
+- `PlaybackHost`, `PlayerController`, the 500 ms delay and every `TODO(sub-project 2)` in `:playback` are gone.
+- `AriaApp` implements `PlaybackEngineProvider` with the injected engine and calls `engine.restore()` once at startup on the main thread.
+- `ACCESS_NETWORK_STATE` is declared. Both flavors assemble; `checkModuleGraph`, lint and the license check pass.
+- `RadioSource` is bound to an empty stand-in in `:app` (endless radio is off by default); Task 12 replaces it with `YouTubeRadioSource`.
+
+- [ ] **Step 1: Build check (no new JVM test: the adapter is exercised by the emulator tests in Task 13).** Push the compile of the code below.
+
+- [ ] **Step 2: Implement the Media3 adapter and service.** (Delete the old `:playback` files first.)
+
 ```kotlin
 // Media3PlayerOutput.kt
 // SPDX-License-Identifier: GPL-3.0-only
@@ -1813,7 +1947,11 @@ import java.io.IOException
 
 /** ExoPlayer behind the engine's PlayerOutput. Items are lightweight (`aria://track/<id>`); URLs resolve at load time. */
 @UnstableApi
-class Media3PlayerOutput(context: Context, private val engine: DefaultPlaybackEngine) : PlayerOutput, Player.Listener {
+class Media3PlayerOutput(
+    context: Context,
+    private val engine: DefaultPlaybackEngine,
+    private val allowLocalStreams: Boolean = false,
+) : PlayerOutput, Player.Listener {
     override var listener: PlayerListener? = null
 
     val exo: ExoPlayer = ExoPlayer.Builder(context)
@@ -1842,6 +1980,7 @@ class Media3PlayerOutput(context: Context, private val engine: DefaultPlaybackEn
         } catch (e: CancellationException) { throw e
         } catch (e: StreamUnavailableException) { throw PermanentStreamException(e)
         } catch (e: Exception) { throw IOException(e) }
+        if (!StreamUrlPolicy.isAllowed(stream.url, allowLocalStreams)) throw PermanentStreamException(IllegalStateException("unsupported stream scheme"))
         return spec.withUri(stream.url.toUri())
     }
 
@@ -1952,7 +2091,8 @@ class AriaPlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         engine = (application as PlaybackEngineProvider).playbackEngine
-        val out = Media3PlayerOutput(this, engine).also { output = it }
+        val allowLocal = (application as PlaybackEngineProvider).allowLocalStreams
+        val out = Media3PlayerOutput(this, engine, allowLocal).also { output = it }
         session = MediaSession.Builder(this, EngineForwardingPlayer(out.exo, engine))
             .setCallback(TrustedCallback(packageName))
             .build()
@@ -1987,12 +2127,133 @@ class AriaPlaybackService : MediaSessionService() {
 }
 ```
 
-Delete the old files and add the `:app` shim described under Interfaces (replace `SkeletonScreen` call in `MainActivity` by a `Text`; remove `ResumeStore` injections, `SharedPrefsResumeStore`, and its provider in `AppModule`). Keep `:app` compiling; Task 11 builds the real UI.
+- [ ] **Step 3: Wire `:app`.** Delete `SkeletonScreen.kt` and `SharedPrefsResumeStore.kt`. Manifest: add `<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />`.
 
-- [ ] **Step 4:** Push; fix API-name mismatches reported by CI **(verify: `isTrusted`, `isMediaNotificationController`, `ConnectionResult.reject`, `ForwardingPlayer` overrides, `ResolvingDataSource.Factory` lambda form, `@OptIn(UnstableApi)` placement)**. Expected after fixes: PASS, `:app` assembles both flavors.
+```kotlin
+// ConnectivityNetworkMonitor.kt
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music
+
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import app.aria.domain.NetworkMonitor
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+
+class ConnectivityNetworkMonitor(context: Context) : NetworkMonitor {
+    private val cm = context.getSystemService(ConnectivityManager::class.java)
+    private val state = MutableStateFlow(currentlyOnline())
+    override val online: StateFlow<Boolean> = state
+
+    private fun currentlyOnline(): Boolean =
+        cm.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+
+    init {
+        cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) { state.value = true }
+            override fun onLost(network: Network) { state.value = false }
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                state.value = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            }
+        })
+    }
+}
+```
+
+`AppModule.kt`: delete the `resume` provider and the `ResumeStore`/`SharedPrefsResumeStore` imports; keep `database`, `playEvents`, `search` and the current `streams()`; add:
+
+```kotlin
+    @Provides @Singleton fun network(@ApplicationContext c: Context): NetworkMonitor = ConnectivityNetworkMonitor(c)
+    @Provides @Singleton fun queueStore(db: AriaDatabase): QueueStore = QueueStoreImpl(db.queueDao())
+    /** Stand-in until Task 12 binds YouTubeRadioSource. */
+    @Provides @Singleton fun radio(): RadioSource = object : RadioSource {
+        override suspend fun related(seed: Track, limit: Int): Result<List<Track>> = Result.success(emptyList())
+    }
+
+    @Provides @Singleton
+    fun engine(
+        streams: StreamSource, store: QueueStore, radio: RadioSource, history: PlayEventRepository, network: NetworkMonitor,
+    ): DefaultPlaybackEngine = DefaultPlaybackEngine(streams, store, radio, history, network, Dispatchers.Main.immediate)
+
+    @Provides @Singleton fun playbackEngine(e: DefaultPlaybackEngine): PlaybackEngine = e
+```
+
+`AriaApp.kt`: add `import javax.inject.Inject`, `kotlinx.coroutines.MainScope`, `kotlinx.coroutines.launch`; class header `class AriaApp : Application(), PlaybackEngineProvider`; members:
+
+```kotlin
+    @Inject lateinit var engine: DefaultPlaybackEngine
+    override val playbackEngine: DefaultPlaybackEngine get() = engine
+```
+and at the end of `onCreate()`: `MainScope().launch { engine.restore() }`.
+
+`MainActivity.kt` (minimal, real):
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
+import app.aria.domain.*
+import app.aria.playback.AriaPlaybackService
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@AndroidEntryPoint
+class MainActivity : ComponentActivity() {
+    @Inject lateinit var search: SearchSource
+    @Inject lateinit var engine: PlaybackEngine
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            MaterialTheme {
+                val state by engine.state.collectAsState()
+                val scope = rememberCoroutineScope()
+                var query by remember { mutableStateOf("") }
+                var results by remember { mutableStateOf<List<Track>>(emptyList()) }
+                Column(Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(BuildConfig.BRAND_NAME, style = MaterialTheme.typography.titleLarge)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(query, { query = it }, label = { Text("Search") }, modifier = Modifier.weight(1f))
+                        Button(onClick = { scope.launch { search.searchTracks(query).onSuccess { results = it } } }) { Text("Search") }
+                    }
+                    Text(state.current?.track?.title ?: "Nothing playing")
+                    Button(
+                        enabled = state.current != null,
+                        onClick = { if (state.status == PlaybackStatus.Playing) engine.pause() else engine.play() },
+                    ) { Text("Play/Pause") }
+                    LazyColumn {
+                        itemsIndexed(results) { i, t ->
+                            TextButton(onClick = { AriaPlaybackService.start(this@MainActivity); engine.playNow(results, i) }) {
+                                Text("${t.title} - ${t.artists.joinToString()}", maxLines = 1)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+- [ ] **Step 4:** Push; fix compile and lint findings from CI **(verify: `isTrusted`, `isMediaNotificationController`, `ConnectionResult.reject`, `ForwardingPlayer` overrides, `ResolvingDataSource.Factory` lambda form, `@OptIn(UnstableApi)` placement)**. Expected: PASS, both flavors assemble, all existing jobs green.
 - [ ] **Step 5: Commit** `feat(playback): Media3 output and service driven by the engine; remove skeleton host`.
 
-### Task 8: Signed cipher-config handling (updates disabled)
+---
+
+### Task 9: Signed cipher-config handling (updates disabled)
 
 Spec section 4 "Cipher player-config hosting and trust" (stress-test branch 4, ADR-0002). Ported Meld code fetches player configs from another project's GitHub repository; Aria ships a bundled default and only ever accepts signed updates, and the update path stays **off** until production keys exist.
 
@@ -2000,11 +2261,11 @@ Spec section 4 "Cipher player-config hosting and trust" (stress-test branch 4, A
 - Create: `core/src/main/kotlin/app/aria/core/cipher/{CipherConfigVerifier,RegexGuard}.kt`
 - Create: `innertube/src/main/kotlin/app/aria/innertube/cipher/{CipherConfigStore,FileCipherConfigStore,CipherConfigUpdater,AriaPlayerConfigRepository}.kt`
 - Create: `innertube/src/main/resources/aria/player_configs.json` (bundled default)
-- Modify: `docs/provenance.csv`, `docs/release-gates.md`
+- Modify: `innertube/build.gradle.kts` (add `implementation(project(":core"))` for the verifier, `implementation(libs.kotlinx.serialization.json)` and Tink if the cipher store needs them directly, and `testImplementation(kotlin("test"))`, `testImplementation(libs.coroutines.test)`; `ModuleGraphRules` already allows `:innertube` to depend on `:core`), `docs/provenance.csv`, `docs/release-gates.md`
 - Test: `core/src/test/kotlin/app/aria/core/cipher/{CipherConfigVerifierTest,RegexGuardTest}.kt`, `innertube/src/test/kotlin/app/aria/innertube/cipher/{CipherConfigUpdaterTest,FileCipherConfigStoreTest}.kt`
 
 **Interfaces:**
-- Consumes: Tink `Ed25519Verify` / `Ed25519Sign` (already in `:core`), kotlinx.serialization JSON (already in `:core`), InnerTubeX `PlayerConfigRepository` **(verify: read `cipher/PlayerConfigRepository.kt` at tag v0.5.2; Meld's `AndroidPlayerConfigRepository` exposes `enabled`, `sourceUrl`, `defaultSourceUrl` and a cached JSON, so mirror whatever members the interface declares)**.
+- Consumes: Tink `Ed25519Verify` / `Ed25519Sign` (already in `:core`), kotlinx.serialization JSON (already in `:core`), the Task 0 spike findings (`docs/spikes/2026-11-playback-apis.md` items 1 and 2; the spike's license conclusion decides Step 3.4), InnerTubeX `PlayerConfigRepository` **(already recorded in the spike; if not, read `cipher/PlayerConfigRepository.kt` at tag v0.5.2; Meld's `AndroidPlayerConfigRepository` exposes `enabled`, `sourceUrl`, `defaultSourceUrl` and a cached JSON, so mirror whatever members the interface declares)**.
 - Produces:
   - `class CipherConfigVerifier(publicKeys: List<ByteArray>, allowedTopLevelKeys: Set<String>, maxAgeMs: Long, maxFutureSkewMs: Long = 300_000, lastAcceptedVersion: () -> Long, clock: () -> Long)` with `fun verify(payload: ByteArray, signature: ByteArray): CipherVerifyResult` (`Valid(version: Long, configJson: String)` / `Invalid(reason: String)`) and `companion fun signingInput(payload): ByteArray` (context `aria-cipher-config-v1\n`).
   - `object RegexGuard { fun isSafe(pattern: String): Boolean }`.
@@ -2186,7 +2447,7 @@ decode with `Json { ignoreUnknownKeys = false }`; order of checks: size, signatu
 
 3.3 innertube classes: `FileCipherConfigStore(dir)` writes `config.json` and `version.txt` via a temp file and atomic rename; `readConfig()` returns null if absent; `lastVersion()` 0 if absent or unreadable. `CipherConfigUpdater.updateOnce()`: `if (!enabled || url.isNullOrBlank()) return Disabled`; `val f = runCatching { fetch(url) }.getOrNull() ?: return NoUpdate`; `when (val r = verifier.verify(f.payload, f.signature)) { is Valid -> { store.write(r.configJson, r.version); Applied(r.version) } is Invalid -> Rejected(r.reason) }`. `AriaPlayerConfigRepository`: implement the InnerTubeX interface found in Step 3.0 below; its JSON is `store?.readConfig() ?: defaultJson()`. The sample `defaultJson` loader used by the app is `{ AriaPlayerConfigRepository::class.java.getResourceAsStream("/aria/player_configs.json")!!.bufferedReader().use { it.readText() } }`.
 
-3.4 **Bundled default and license (blocking pre-step; do first).** (a) Check whether InnerTubeX v0.5.2 already embeds a default config (look for `withEmbeddedConfigFallback`, an `assets`/`resources` JSON, or a default in `PlayerConfigRepository`); if it does, use that and skip (b). (b) Otherwise read the license of `ZemerTeam/zemer-cipher` (GitHub repository page and LICENSE). If it is GPL-3.0-compatible (MIT, Apache-2.0, GPL-3.0, BSD), copy `library/src/main/assets/player_configs.json` from the pinned commit into `innertube/src/main/resources/aria/player_configs.json`. If it has no license or an incompatible one, **stop and report BLOCKED**; the controller will ask the maintainer. Add the provenance row (`path,origin_repo,origin_commit,origin_license,kind,notes`) for `innertube/src/main/resources/aria` with the origin commit SHA and the license text actually read. Derive `allowedTopLevelKeys` for production use from this file's top-level keys and record them in the test that loads the bundled default (`BundledConfigTest`: parses as JSON; top-level keys are exactly the constant `AriaCipherConfig.ALLOWED_TOP_LEVEL_KEYS`).
+3.4 **Bundled default and license (apply the Task 0 spike's conclusion; do first; re-check only if the spike left it open).** (a) Check whether InnerTubeX v0.5.2 already embeds a default config (look for `withEmbeddedConfigFallback`, an `assets`/`resources` JSON, or a default in `PlayerConfigRepository`); if it does, use that and skip (b). (b) Otherwise read the license of `ZemerTeam/zemer-cipher` (GitHub repository page and LICENSE). If it is GPL-3.0-compatible (MIT, Apache-2.0, GPL-3.0, BSD), copy `library/src/main/assets/player_configs.json` from the pinned commit into `innertube/src/main/resources/aria/player_configs.json`. If it has no license or an incompatible one, **stop and report BLOCKED**; the controller will ask the maintainer. Add the provenance row (`path,origin_repo,origin_commit,origin_license,kind,notes`) for `innertube/src/main/resources/aria` with the origin commit SHA and the license text actually read. Derive `allowedTopLevelKeys` for production use from this file's top-level keys and record them in the test that loads the bundled default (`BundledConfigTest`: parses as JSON; top-level keys are exactly the constant `AriaCipherConfig.ALLOWED_TOP_LEVEL_KEYS`).
 
 3.5 `docs/release-gates.md`, "Before the first public build": add `- [ ] Cipher config: generate production Ed25519 key(s), host the signed config at an Aria-controlled URL, embed the public key(s), then enable \`CipherConfigUpdater\` (disabled in the alpha; extractor hot-fixes between app releases need this).`
 
@@ -2195,7 +2456,7 @@ decode with `Json { ignoreUnknownKeys = false }`; order of checks: size, signatu
 
 ---
 
-### Task 9: Extractor adapter, failed-client memory and radio source
+### Task 10: Extractor adapter, failed-client memory and radio source
 
 **Files:**
 - Create: `innertube/src/main/kotlin/app/aria/innertube/extraction/{PoTokenSource,ExtractedAudio,FailedClientMemory,AudioExtractor,ExtractorSession,InnerTubeXAudioExtractor}.kt`, `innertube/src/main/kotlin/app/aria/innertube/adapter/YouTubeRadioSource.kt`
@@ -2203,7 +2464,7 @@ decode with `Json { ignoreUnknownKeys = false }`; order of checks: size, signatu
 - Test: `innertube/src/test/kotlin/app/aria/innertube/extraction/{FailedClientMemoryTest,ExtractedAudioTest}.kt`, `innertube/src/test/kotlin/app/aria/innertube/adapter/{YouTubeStreamSourceTest,YouTubeRadioSourceTest}.kt`
 
 **Interfaces:**
-- Consumes: Task 8 `AriaPlayerConfigRepository`, `StreamSource`, `RadioSource`, `YouTube.next`, `WatchEndpoint`, `NextResult`, `SongItem.toTrack()`.
+- Consumes: Task 9 `AriaPlayerConfigRepository`, `StreamSource`, `RadioSource`, `YouTube.next`, `WatchEndpoint`, `NextResult`, `SongItem.toTrack()`.
 - Produces:
   - `data class PoTokens(val playerRequestToken: String, val streamingDataToken: String, val visitorData: String)`; `interface PoTokenSource { suspend fun webClientPoToken(videoId: String, visitorData: String): PoTokens; fun close() }`.
   - `data class ExtractedAudio(val url: String, val mimeType: String, val codecs: String?, val bitrate: Int, val contentLength: Long?, val expiresAtEpochMs: Long?, val loudnessDb: Double?, val client: String)` with `fun toResolvedStream(): ResolvedStream`.
@@ -2216,6 +2477,7 @@ decode with `Json { ignoreUnknownKeys = false }`; order of checks: size, signatu
 **Acceptance Criteria:**
 - `resolve` returns `ResolvedStream` with `loudnessDb`, an absolute `expiresAtEpochMs` (extractor value, else `now + 5 min`), `mimeType` with codecs when present.
 - A rejected stream (`markRejected`) makes the next `resolve` for that video exclude the client that served it; memory entries expire after the TTL.
+- `YouTubeStreamSource` rejects (as `StreamUnavailableException`) any extractor URL that is not `https` before it is cached (test: an extractor returning `file:///x` yields a failure).
 - Permanent extractor failures surface as `StreamUnavailableException`; others as ordinary failures (so the engine retries them as transient).
 - `YouTubeRadioSource` returns at most `limit` tracks, never the seed, from `next(WatchEndpoint(videoId, playlistId = "RDAMVM<id>"))`, and fails (not throws) for non-YouTube seeds.
 - The Task 1 skeleton resolver (ANDROID_MUSIC client only, no cipher, no PoToken) is gone. Without a PoToken source, extraction still works for clients that do not need one.
@@ -2270,10 +2532,10 @@ import org.junit.Test
 
 class YouTubeStreamSourceTest {
     private class FakeExtractor : AudioExtractor {
-        val excluded = mutableListOf<Set<String>>(); var failure: Throwable? = null; var client = "ANDROID_VR"; var expires: Long? = null
+        val excluded = mutableListOf<Set<String>>(); var failure: Throwable? = null; var client = "ANDROID_VR"; var expires: Long? = null; var url: String? = null
         override suspend fun extract(videoId: String, excludeClients: Set<String>): ExtractedAudio {
             excluded += excludeClients; failure?.let { throw it }
-            return ExtractedAudio("https://x/$videoId", "audio/webm", "opus", 128_000, 10L, expires, 2.0, client)
+            return ExtractedAudio(url ?: "https://x/$videoId", "audio/webm", "opus", 128_000, 10L, expires, 2.0, client)
         }
     }
     private var now = 1_000L
@@ -2296,6 +2558,10 @@ class YouTubeStreamSourceTest {
     @Test fun otherFailuresStayOrdinary() = runBlocking {
         extractor.failure = java.io.IOException("timeout")
         val e = source.resolve(id).exceptionOrNull(); assertTrue(e is java.io.IOException)
+    }
+    @Test fun nonHttpsUrlIsRejected() = runBlocking {
+        extractor.url = "file:///data/data/app.aria.music/databases/aria.db"
+        assertTrue(source.resolve(id).exceptionOrNull() is StreamUnavailableException)
     }
     @Test fun nonYouTubeIdsAreRejected() = runBlocking {
         assertTrue(source.resolve(TrackId.parse("local:abc")).isFailure)
@@ -2391,6 +2657,7 @@ class YouTubeStreamSource(
     override suspend fun resolve(id: TrackId): Result<ResolvedStream> = runCatching {
         require(id.source == TrackSource.YOUTUBE) { "Not a YouTube track: $id" }
         val audio = extractor.extract(id.value, memory.failed(id.value))
+        if (!audio.url.startsWith("https://")) throw StreamUnavailableException("Extractor returned a non-https stream URL")
         lastClient[id] = audio.client
         val stream = audio.toResolvedStream()
         stream.copy(expiresAtEpochMs = stream.expiresAtEpochMs ?: (clock() + DEFAULT_TTL_MS))
@@ -2420,23 +2687,23 @@ class YouTubeRadioSource(
 }
 ```
 
-3.2 **Extractor wiring (needs the library source; do this after 3.1 is green).** Read, via WebFetch (raw GitHub is blocked in the shell): Meld `app/src/main/kotlin/com/metrolist/music/utils/InnerTubeXPlayer.kt` at commit `fe9a666227ff3d6667075e65a4330518a724524b`, and InnerTubeX v0.5.2 (`MetrolistGroup/innertubex`) classes `extraction/InnerTubeExtractor`, `ExtractedStream`, `StreamResolveException`, `TokenProvider`, `PoTokenResult`, `cipher/YouTubeCipherService`, `cipher/RemotePlayerConfigStore`, `PlayerConfigRepository`. Port **only** the bundle-building and `extract` logic into `ExtractorSession` and `InnerTubeXAudioExtractor` (everything below is what Meld's file does; names marked **(verify)**):
+3.2 **Extractor wiring (use the declarations copied into `docs/spikes/2026-11-playback-apis.md` item 2; do this after 3.1 is green).** Where the spike lacks something, read, via WebFetch (raw GitHub is blocked in the shell): Meld `app/src/main/kotlin/com/metrolist/music/utils/InnerTubeXPlayer.kt` at commit `fe9a666227ff3d6667075e65a4330518a724524b`, and InnerTubeX v0.5.2 (`MetrolistGroup/innertubex`) classes `extraction/InnerTubeExtractor`, `ExtractedStream`, `StreamResolveException`, `TokenProvider`, `PoTokenResult`, `cipher/YouTubeCipherService`, `cipher/RemotePlayerConfigStore`, `PlayerConfigRepository`. Port **only** the bundle-building and `extract` logic into `ExtractorSession` and `InnerTubeXAudioExtractor` (everything below is what Meld's file does; names marked **(verify)**):
 - A cached "bundle" rebuilt when `YouTube.extractionTransport().generation` changes (under a `Mutex`; dispose the old cipher service): `RemotePlayerConfigStore(httpClient, configRepository, logger)` → `YouTubeCipherService(httpClient, remoteStore, logger)`; `YtConfigParserImpl(httpClient, innerTube, remoteStore, logger).withEmbeddedConfigFallback()`; `InnerTubeExtractor(configParser, cipherService, innerTube, tokenProvider, logger)`.
-- `configRepository` is the Task 8 `AriaPlayerConfigRepository` (never Meld's `AndroidPlayerConfigRepository`; no ZemerTeam URL may appear anywhere in Aria's tree: add `scripts/` grep in Task 13).
+- `configRepository` is the Task 9 `AriaPlayerConfigRepository` (never Meld's `AndroidPlayerConfigRepository`; no ZemerTeam URL may appear anywhere in Aria's tree: add `scripts/` grep in Task 14).
 - `tokenProvider`: anonymous `TokenProvider` with `capabilities = TokenProviderCapabilities(providers = setOf(PoTokenProviderKind.WEB_BOTGUARD), usesWebView = true)` and `getPoToken(videoId, visitorData, cookie)` delegating to `poTokens?.webClientPoToken(...)` mapped to `PoTokenResult(playerRequestToken, streamingDataToken, visitorData)`; when `poTokens == null` return a provider without WebView capability **(verify how the extractor treats a missing token provider; if it requires one, return a provider that throws a clear exception and let the extractor fall back to clients that need no token)**.
 - `extract`: call `extractor.extract(...)` with HLS and SABR disabled, `excludeClients`, audio quality HIGH, a fresh `generateClientPlaybackNonce()`, and `allowBoundedRange` as Meld does; reject a SABR bootstrap result; rethrow `CancellationException`; for `StreamResolveException` whose kind is NETWORK rethrow its cause (transient), for other kinds throw `StreamUnavailableException(message)` (permanent). Map `ExtractedStream` to `ExtractedAudio` using `audioUrl`, `mimeType`, `codecs`, `bitrate ?: 0`, `contentLengthBytes`, `expiresAt` (epoch ms), `loudnessDb ?: perceptualLoudnessDb`, `clientName`.
 - Drop from the port: Meld's `AudioQuality` constants, `PlaybackData`, playlist and uploaded-content handling, connectivity-based quality, the Android `Context` requirement (Aria's repository needs none).
 - `Mutex`, transport generation caching, `markStreamClientFailed` TTL map: **not** ported; `FailedClientMemory` replaces the TTL map.
 - Add the provenance row for `innertube/src/main/kotlin/app/aria/innertube/extraction` (origin Meld commit above, license read from the file header or Meld's LICENSE, kind `adapted`).
 
-3.3 Delete the old `YouTubeStreamSource` body, `bestAudio()` and its two `MappingTest` cases (`bestAudioPicksHighestBitrateWithUrl`, `bestAudioIsNullWhenNoUrls`) once nothing uses them. Update `AppModule.streams()` to `YouTubeStreamSource.create(ExtractorSession.createDefault(poTokens = null))` as a temporary wiring; Task 11 replaces it. Update `PlaybackSmokeTest` to build the source the same way (no PoToken in a JVM test).
+3.3 Delete the old `YouTubeStreamSource` body, `bestAudio()` and its two `MappingTest` cases (`bestAudioPicksHighestBitrateWithUrl`, `bestAudioIsNullWhenNoUrls`) once nothing uses them. Update `AppModule.streams()` to `YouTubeStreamSource.create(ExtractorSession.createDefault(poTokens = null))` as a temporary wiring; Task 12 replaces it. Update `PlaybackSmokeTest` to build the source the same way (no PoToken in a JVM test).
 
 - [ ] **Step 4:** Push; fix compile errors against the real InnerTubeX API. Expected: PASS for all unit tests; the smoke test stays skipped in normal CI.
 - [ ] **Step 5: Commit** `feat(innertube): extractor-based stream source, failed-client memory, radio source`.
 
 ---
 
-### Task 10: WebView PoToken generator (port, confined)
+### Task 11: WebView PoToken generator (port, confined)
 
 Spec section 4 "WebView confinement" (branch 3, security, ADR-0002).
 
@@ -2447,7 +2714,7 @@ Spec section 4 "WebView confinement" (branch 3, security, ADR-0002).
 - Test: `innertube/src/test/kotlin/app/aria/innertube/potoken/{PoTokenValidatorTest,NavigationPolicyTest}.kt`, `scripts/test_check_webview_safety.py`
 
 **Interfaces:**
-- Consumes: Task 9 `PoTokenSource`, `PoTokens`.
+- Consumes: Task 10 `PoTokenSource`, `PoTokens`.
 - Produces: `class WebViewPoTokenSource(context: Context) : PoTokenSource`; `object PoTokenValidator { fun isValid(token: String): Boolean }`; `object NavigationPolicy { fun isAllowed(url: String): Boolean }`.
 
 **Acceptance Criteria:**
@@ -2455,6 +2722,7 @@ Spec section 4 "WebView confinement" (branch 3, security, ADR-0002).
 - The WebView is never attached to a window; `allowFileAccess`, `allowContentAccess`, geolocation, and `allowFileAccessFromFileURLs`/`allowUniversalAccessFromFileURLs` are off; cookies are not shared with other sessions (cookie manager untouched, `setAcceptThirdPartyCookies(false)`); navigation and subresource requests go through `NavigationPolicy` and anything else is cancelled or answered with an empty response.
 - Exactly one JavaScript-bridge object with one `@JavascriptInterface` method that receives only a string; every token passes `PoTokenValidator` (`[A-Za-z0-9_\-+/=]{20,4096}`) before use.
 - The WebView is destroyed after each batch (token pair cached in the generator, not the WebView).
+- (Stress-test branch 3) Every WebView operation (create, evaluate, destroy) runs on `Dispatchers.Main` via `withContext(dispatcher)`, where `PoTokenGenerator(dispatcher: CoroutineDispatcher = Dispatchers.Main)` takes the dispatcher as a parameter; a `Mutex` allows one WebView at a time; generation has its own 15 s timeout so a hung BotGuard challenge fails fast instead of waiting for the engine's 20 s bound.
 - `scripts/check-webview-safety.sh` fails the build if `addJavascriptInterface`, `WebView(` construction or `setJavaScriptEnabled(true)`/`javaScriptEnabled = true` appears outside `innertube/src/main/kotlin/app/aria/innertube/potoken/PoTokenWebView.kt`, or if `allowFileAccess = true`/`setAllowFileAccess(true)` or `loadUrl("file:` appears anywhere.
 - `docs/data-flow.md` states that BotGuard sends visitor data and a challenge request to Google and involves no Aria server.
 
@@ -2525,10 +2793,10 @@ exit $fail
 
 Make it executable (`chmod +x`), add `scripts/check-webview-safety.sh` to the "Static checks" step in `ci.yml`.
 
-3.2 **Port.** Read the license and the five files `PoTokenGenerator.kt`, `PoTokenWebView.kt`, `JavaScriptUtil.kt`, `PoTokenResult.kt`, `PoTokenException.kt` under `app/src/main/kotlin/com/metrolist/music/utils/potoken/` of `FrancescoGrazioso/Meld` at commit `fe9a666227ff3d6667075e65a4330518a724524b` via WebFetch (if a file is truncated, fetch the GitHub "raw" or "blame" view in pieces; do not retype from memory). Package `app.aria.innertube.potoken`; keep upstream headers, add SPDX; replace Meld-specific imports (`NewPipeExtractor`/`Timber` use is fine if the dependency exists; otherwise use `timber`, which `:innertube` already has); add the provenance row for the directory (`innertube/src/main/kotlin/app/aria/innertube/potoken`).
+3.2 **Port.** Start from `docs/spikes/2026-11-playback-apis.md` item 4 (file list, header, JS hosts). Read the license and the five files `PoTokenGenerator.kt`, `PoTokenWebView.kt`, `JavaScriptUtil.kt`, `PoTokenResult.kt`, `PoTokenException.kt` under `app/src/main/kotlin/com/metrolist/music/utils/potoken/` of `FrancescoGrazioso/Meld` at commit `fe9a666227ff3d6667075e65a4330518a724524b` via WebFetch (if a file is truncated, fetch the GitHub "raw" or "blame" view in pieces; do not retype from memory). Package `app.aria.innertube.potoken`; keep upstream headers, add SPDX; replace Meld-specific imports (`NewPipeExtractor`/`Timber` use is fine if the dependency exists; otherwise use `timber`, which `:innertube` already has); add the provenance row for the directory (`innertube/src/main/kotlin/app/aria/innertube/potoken`).
 
 3.3 **Hardening edits in `PoTokenWebView.kt`** (each is a checked acceptance item):
-- `WebView(context)` is created on the main thread, never added to a view hierarchy.
+- `WebView(context)` is created inside `withContext(dispatcher)` (main), never added to a view hierarchy; all calls into it stay in that context, and the generator's public `suspend` functions are safe to call from the ExoPlayer loader thread.
 - `settings.javaScriptEnabled = true` (needed by BotGuard), `allowFileAccess = false`, `allowContentAccess = false`, `allowFileAccessFromFileURLs = false`, `allowUniversalAccessFromFileURLs = false`, `setGeolocationEnabled(false)`, `domStorageEnabled` only if the ported JS needs it, `mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW`, `blockNetworkLoads = false`; `CookieManager.getInstance().setAcceptThirdPartyCookies(webView, false)`.
 - `WebViewClient`: `shouldOverrideUrlLoading` returns `!NavigationPolicy.isAllowed(url)`; `shouldInterceptRequest` returns an empty `WebResourceResponse("text/plain", "utf-8", 403, "Blocked", emptyMap(), ByteArrayInputStream(ByteArray(0)))` for disallowed URLs; `onReceivedSslError` always `handler.cancel()`.
 - One bridge: `class Bridge { @JavascriptInterface fun onResult(value: String) }` registered under a fixed name; the ported JS posts the token string to it; Kotlin validates with `PoTokenValidator` before use. No app object is exposed.
@@ -2544,88 +2812,35 @@ Make it executable (`chmod +x`), add `scripts/check-webview-safety.sh` to the "S
 - [ ] **Step 4:** Push; `scripts` pytest, unit tests, lint (WebView lint warnings such as `SetJavaScriptEnabled` and `JavascriptInterface` need `@SuppressLint` with a one-line justification pointing to ADR-0002), both flavors build. Expected: PASS.
 - [ ] **Step 5: Commit** `feat(innertube): confined WebView PoToken generator ported from Meld`.
 
-### Task 11: App wiring and player UI
+### Task 12: Player screen and final app wiring
 
 **Files:**
-- Create: `app/src/main/kotlin/app/aria/music/{ConnectivityNetworkMonitor,PlayerScreen}.kt`
-- Modify: `app/src/main/kotlin/app/aria/music/{AriaApp,MainActivity}.kt`, `app/src/main/kotlin/app/aria/music/di/AppModule.kt`, `app/src/main/AndroidManifest.xml`
-- Delete: the Task 7 shim text in `MainActivity` (replaced), any remaining `SkeletonScreen.kt`, `SharedPrefsResumeStore.kt`
+- Create: `app/src/main/kotlin/app/aria/music/PlayerScreen.kt`
+- Modify: `app/src/main/kotlin/app/aria/music/MainActivity.kt` (the minimal Task 8 screen becomes `PlayerScreen`), `app/src/main/kotlin/app/aria/music/di/AppModule.kt` (real `RadioSource`, `PoTokenSource`, `ExtractorSession`, `StreamSource`)
 
 **Interfaces:**
-- Consumes: everything from Tasks 1 to 10.
-- Produces: the engine as a Hilt singleton bound as both `DefaultPlaybackEngine` and `PlaybackEngine`; `AriaApp : PlaybackEngineProvider`.
+- Consumes: everything from Tasks 1 to 11; the engine, network monitor, queue store, `AriaApp` provider and manifest permission already exist from Task 8.
+- Produces: the finished player UI.
 
 **Acceptance Criteria:**
 - Both flavors assemble; `checkModuleGraph`, lint (including `NewApi`) and the license check pass.
-- `AriaApp` implements `PlaybackEngineProvider` with the injected engine, and calls `engine.restore()` once at startup on the main thread.
 - The screen offers: search; tap a result to play it with the result list as queue; "Next" and "Add" per result; now-playing block with seek slider, previous/play-pause/next, shuffle and repeat toggles; queue list with remove and move up/down; sleep timer (15 min, end of track, off); switches for skip silence, loudness normalization and endless radio; skip and stop events shown as a message.
 - Starting playback calls `AriaPlaybackService.start(context)` first and requests `POST_NOTIFICATIONS` on API 33+ (playback continues if declined).
-- `ACCESS_NETWORK_STATE` is declared; no `TODO(sub-project 2)` remains anywhere (`grep -rn "TODO(sub-project 2)" .` over source returns nothing).
+- `AppModule` provides the real `YouTubeRadioSource`, `WebViewPoTokenSource`, `ExtractorSession` and `YouTubeStreamSource` (replacing Task 8's empty radio stand-in and Task 10's temporary `streams()` wiring).
+- No `TODO(sub-project 2)` remains anywhere (`grep -rn "TODO(sub-project 2)" .` over source returns nothing).
 
-- [ ] **Step 1: Build check (no new JVM test: the logic lives in the engine).** Push the first compile of the changes below; the emulator test in Task 12 covers the wiring.
+- [ ] **Step 1: Build check (no new JVM test: the logic lives in the engine).** Push the first compile of the changes below; the emulator test in Task 13 covers the wiring.
 
-- [ ] **Step 2: Implement.** Manifest: add `<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />`.
-
-```kotlin
-// ConnectivityNetworkMonitor.kt
-// SPDX-License-Identifier: GPL-3.0-only
-package app.aria.music
-
-import android.content.Context
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
-import app.aria.domain.NetworkMonitor
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-
-class ConnectivityNetworkMonitor(context: Context) : NetworkMonitor {
-    private val cm = context.getSystemService(ConnectivityManager::class.java)
-    private val state = MutableStateFlow(currentlyOnline())
-    override val online: StateFlow<Boolean> = state
-
-    private fun currentlyOnline(): Boolean =
-        cm.getNetworkCapabilities(cm.activeNetwork)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
-
-    init {
-        cm.registerDefaultNetworkCallback(object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) { state.value = true }
-            override fun onLost(network: Network) { state.value = false }
-            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
-                state.value = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-            }
-        })
-    }
-}
-```
-
-`AppModule.kt` (keep `database` and `playEvents`, `search`; drop `resume`):
+- [ ] **Step 2: Implement.** `AppModule.kt`: replace the `radio()` stand-in and the temporary `streams()` with:
 
 ```kotlin
-    @Provides @Singleton fun network(@ApplicationContext c: Context): NetworkMonitor = ConnectivityNetworkMonitor(c)
-    @Provides @Singleton fun queueStore(db: AriaDatabase): QueueStore = QueueStoreImpl(db.queueDao())
     @Provides @Singleton fun radio(): RadioSource = YouTubeRadioSource()
     @Provides @Singleton fun poTokens(@ApplicationContext c: Context): PoTokenSource = WebViewPoTokenSource(c)
     @Provides @Singleton fun extractorSession(p: PoTokenSource): ExtractorSession = ExtractorSession.createDefault(p)
     @Provides @Singleton fun streams(s: ExtractorSession): StreamSource = YouTubeStreamSource.create(s)
-
-    @Provides @Singleton
-    fun engine(
-        streams: StreamSource, store: QueueStore, radio: RadioSource, history: PlayEventRepository, network: NetworkMonitor,
-    ): DefaultPlaybackEngine = DefaultPlaybackEngine(streams, store, radio, history, network, Dispatchers.Main.immediate)
-
-    @Provides @Singleton fun playbackEngine(e: DefaultPlaybackEngine): PlaybackEngine = e
 ```
 
-`AriaApp.kt`: add `import javax.inject.Inject`, `kotlinx.coroutines.MainScope`, `launch`; class header `class AriaApp : Application(), PlaybackEngineProvider`; members:
-
-```kotlin
-    @Inject lateinit var engine: DefaultPlaybackEngine
-    override val playbackEngine: DefaultPlaybackEngine get() = engine
-```
-and at the end of `onCreate()`: `MainScope().launch { engine.restore() }`.
-
-`MainActivity.kt`:
+`MainActivity.kt` becomes:
 
 ```kotlin
 @AndroidEntryPoint
@@ -2767,7 +2982,7 @@ fun PlayerScreen(search: SearchSource, engine: PlaybackEngine, startService: () 
 
 ---
 
-### Task 12: Service emulator tests and CI job
+### Task 13: Service emulator tests and CI job
 
 Spec section 6, stress-test branch 2.
 
@@ -2837,6 +3052,7 @@ import android.app.Application
 import kotlinx.coroutines.Dispatchers
 
 class TestAriaApp : Application(), PlaybackEngineProvider {
+    override val allowLocalStreams: Boolean = true   // this test app serves a local WAV; production never does
     override val playbackEngine: DefaultPlaybackEngine by lazy {
         val wav = SilentWav.write(cacheDir)
         DefaultPlaybackEngine(ServiceStreams("file://${wav.absolutePath}"), NoopStore(), NoopRadio(), NoopHistory(), AlwaysOnline(), Dispatchers.Main.immediate)
@@ -2952,7 +3168,7 @@ class HiltWiringTest {
 
 ---
 
-### Task 13: Debug APK workflow, smoke extension, docs and final checks
+### Task 14: Debug APK workflow, smoke extension, docs and final checks
 
 Spec section 7 (definition of done) and section 6 (smoke, manual checklist).
 
@@ -2961,10 +3177,10 @@ Spec section 7 (definition of done) and section 6 (smoke, manual checklist).
 - Modify: `.github/workflows/ci.yml` (foreign-host grep), `innertube/src/test/kotlin/app/aria/innertube/smoke/PlaybackSmokeTest.kt`, `docs/providers/youtube-music.md`, `docs/providers/innertubex.md`, `docs/data-flow.md`, `docs/release-gates.md`, `PRIVACY.md`
 
 **Acceptance Criteria:**
-- `debug-apk` runs on push to `main` and on manual dispatch, builds `foss` and `gms` debug APKs, uploads them as Actions artifacts named with the commit SHA (retention 30 days) and publishes **no** release.
+- `debug-apk` runs **only on manual dispatch** (stress-test branch 1: the repo is public, so Actions artifacts are downloadable by anyone signed in to GitHub, not just collaborators). It builds `foss` and `gms` debug APKs, uploads them as an artifact named with the commit SHA with `retention-days: 1`, and publishes **no** release. The maintainer downloads the APK at once and deletes the run's artifact (`gh run delete <id>` or the Actions UI); Task 14's final report says so.
 - The nightly smoke test still runs as exactly one test method (`tests="1"` check in `smoke.yml` stays valid) and additionally checks that the radio source returns tracks for a fixed seed and that each resolved URL is `https` with an expiry.
 - CI fails if any tracked source or resource file other than docs mentions `ZemerTeam` or `raw.githubusercontent.com` (no dependency on another project's server).
-- Docs match behaviour: provider record (extractor, PoToken generator, bundled cipher config, radio call), data-flow rows, `PRIVACY.md`, release gates (cipher keys; PoToken gate "closes after the maintainer confirms playback on a device"; debug APKs only), and a manual device checklist (play with screen off for five minutes, unplug headphones, receive a call, force-stop and relaunch to resume, airplane mode then restore, sleep timer, shuffle and repeat, kill service from the task manager and press play).
+- Docs match behaviour: provider record (extractor, PoToken generator, bundled cipher config, radio call), data-flow rows, `PRIVACY.md`, release gates (cipher keys; PoToken gate "closes after the maintainer confirms playback on a device"; debug APKs only), and a manual device checklist (play with screen off for five minutes, unplug headphones, receive a call, force-stop and relaunch to resume, airplane mode then restore, sleep timer, shuffle and repeat, kill service from the task manager and press play, Bluetooth disconnect and reconnect, audio focus loss and return from another app, process recreation with the queue restored).
 - `grep -rn "TODO(sub-project 2)\|PlaybackHost\|PlayerController" --include=*.kt --include=*.md --include=*.kts . ` (excluding `.internal/`) returns nothing.
 
 - [ ] **Step 1: `.github/workflows/debug-apk.yml`:**
@@ -2973,8 +3189,7 @@ Spec section 7 (definition of done) and section 6 (smoke, manual checklist).
 # SPDX-License-Identifier: GPL-3.0-only
 name: debug-apk
 on:
-  push: { branches: [main] }
-  workflow_dispatch:
+  workflow_dispatch:   # manual only: artifacts on a public repo are world-downloadable (branch 1)
 permissions: { contents: read }
 jobs:
   build:
@@ -2991,11 +3206,11 @@ jobs:
         with:
           name: aria-debug-${{ github.sha }}
           path: app/build/outputs/apk/**/debug/*.apk
-          retention-days: 30
+          retention-days: 1
           if-no-files-found: error
 ```
 
-This is a private artifact (visible to people with repo access) and deliberately not a release: public builds stay blocked by `docs/release-gates.md`.
+This is **not** a private artifact: on a public repo anyone signed in to GitHub can download it. It is short-lived (1 day), manual-only, and deliberately not a release; delete it after downloading. Public builds stay blocked by `docs/release-gates.md`.
 
 - [ ] **Step 2: Smoke test.** Extend the single existing test method: after the resolve loop, `val radio = YouTubeRadioSource().related(seedTrack, 5)` with `seedTrack` built from the first id (assert `isSuccess` and non-empty), and per resolved stream assert `url.startsWith("https://")` and `expiresAtEpochMs != null`. Do not add a second `@Test`.
 
@@ -3005,10 +3220,10 @@ This is a private artifact (visible to people with repo access) and deliberately
           if git grep -nE 'ZemerTeam|raw\.githubusercontent\.com' -- . ':!docs' ':!.internal' ':!*.csv' ':!*.md' ':!.github'; then echo "Dependence on another project's server found"; exit 1; fi
 ```
 
-- [ ] **Step 4: Docs.** Write `docs/manual-device-checklist.md` (checklist above, each item with expected result). Update the provider record, data-flow, `PRIVACY.md` and release gates as listed. In `docs/release-gates.md` replace the v1.0 line about PoToken with: `- [ ] PoToken generation exists (implemented in sub-project 2); closes after the maintainer confirms real playback on a device with a debug build.`
+- [ ] **Step 4: Docs.** Write `docs/manual-device-checklist.md` (checklist above, each item with expected result). Update the provider record, data-flow, `PRIVACY.md` and release gates as listed. In `docs/release-gates.md` also add under "Before the first public build": `- [ ] Any APK (even a debug build) shared outside the maintainer is a public build: make the repo private first or clear every gate above. Debug-APK artifacts on this public repo are downloadable by anyone signed in to GitHub.` Also correct ADR-0002 item 3 and spec section 7 item 2 ("private Actions artifacts" becomes "short-lived manual artifacts, publicly downloadable while the repo is public"). In `docs/release-gates.md` replace the v1.0 line about PoToken with: `- [ ] PoToken generation exists (implemented in sub-project 2); closes after the maintainer confirms real playback on a device with a debug build.`
 
 - [ ] **Step 5: Final verification.**
-  1. Push; every CI job (verify, glass-ui, playback-service, debug-apk) green on the final commit; download the debug APK artifact name from the run to confirm both flavors uploaded.
+  1. Push; every CI job (verify, glass-ui, playback-service) green on the final commit; dispatch `debug-apk` once, confirm both flavors uploaded, hand the maintainer the run link, and remind them to delete the artifact after downloading.
   2. Run the grep from the acceptance criteria.
   3. Controller dispatches a final whole-branch review (fresh reviewer, spec + this plan as inputs), fixes findings, and re-checks CI.
   4. Report to the maintainer: which APK to install, the manual checklist, and that the PoToken gate remains open until they confirm playback.
@@ -3029,24 +3244,46 @@ This is a private artifact (visible to people with repo access) and deliberately
 | Resume, structure-on-change, 15 s position (3, branch 7) | 4, 6 |
 | Endless radio, batch 25, cap 500 (3, branch 7) | 5 |
 | Sleep timer, skip silence, attenuate-only loudness (3, branch 7) | 5 |
-| Ownership and queue mirroring (2, branch 1) | 2, 7 |
-| `PlaybackEngineProvider`, no Hilt in `:playback`, trusted controllers (2, branch 2) | 7, 11, 12 |
+| Ownership and queue mirroring (2, branch 1) | 2, 8 |
+| `PlaybackEngineProvider`, no Hilt in `:playback`, trusted controllers (2, branch 2) | 7, 8, 12 |
 | `QueueStore` Room table (4) | 6 |
-| Extractor adapter, loudness mapping, failed-client memory (4) | 9 |
-| Radio source, no third-party endpoints (4) | 9, 13 |
-| Cipher config signed, bundled default, disabled (4, branch 4) | 8 |
-| WebView confinement + static check (4, branch 3) | 10 |
+| Extractor adapter, loudness mapping, failed-client memory (4) | 10 |
+| Radio source, no third-party endpoints (4) | 10, 14 |
+| Cipher config signed, bundled default, disabled (4, branch 4) | 9 |
+| WebView confinement + static check (4, branch 3) | 11 |
 | Diagnostics logger (4) | Not a separate task: no new logging of stream URLs, tokens or IPs is added, and `check-webview-safety`/Timber use is limited to messages without URLs. **Surfaced cut:** a `Fix403`-style diagnostics logger is deferred to when a user-facing log export exists (sub-project 3). |
-| Service emulator tests (6, branch 2) | 12 |
-| Real extractor smoke (6) | 13 |
-| Manual device checklist (6) | 13 |
-| Debug APK artifacts, no release (7, branch 5) | 13 |
-| Docs, ledger rows, release gates (7) | 8, 9, 10, 13 |
-| Skeleton `PlaybackHost` and TODOs gone (7) | 7, 11, 13 |
-| PoToken gate stays open (7) | 13 |
+| Service emulator tests (6, branch 2) | 13 |
+| Real extractor smoke (6) | 14 |
+| Manual device checklist (6) | 14 |
+| Debug APK artifacts, no release (7, branch 5) | 14 |
+| Docs, ledger rows, release gates (7) | 9, 10, 11, 14 |
+| Skeleton `PlaybackHost` and TODOs gone (7) | 8, 12, 14 |
+| PoToken gate stays open (7) | 14 |
 
-**Deviations to surface to the maintainer:** (1) the "untrusted controller is rejected" check is a pure `TrustPolicy` unit test, not an emulator test, because a foreign-package controller cannot be created from an instrumentation test; (2) skip silence, loudness and endless-radio toggles are in memory only until sub-project 3 adds settings; (3) the diagnostics logger is deferred (table above); (4) the cipher-config bundled default may be blocked on a license answer (Task 8 Step 3.4), in which case the controller asks the maintainer before continuing.
+**Deviations to surface to the maintainer:** (1) the "untrusted controller is rejected" check is a pure `TrustPolicy` unit test, not an emulator test, because a foreign-package controller cannot be created from an instrumentation test; (2) skip silence, loudness and endless-radio toggles are in memory only until sub-project 3 adds settings; (3) the diagnostics logger is deferred (table above); (4) the cipher-config bundled default may be blocked on a license answer (Task 9 Step 3.4), in which case the controller asks the maintainer before continuing.
 
 **Placeholder scan:** the only deliberate forward references are the five `/* Task 5 */` method bodies in Task 2 (replaced and grep-checked in Task 5) and the **(verify)** marks on third-party API names, which CI resolves. No other TBD/TODO text.
 
-**Type consistency:** `PlayerOutput`, `PlayerListener`, `PlayerError`, `QueueStore`, `SavedQueue(items, originalOrder, shuffle, repeat, nextQueueId)`, `SavedPosition(index, positionMs)`, `ResolvedStream.loudnessDb`, `StreamSource.markRejected`, `RadioSource.related(seed, limit)`, `NetworkMonitor.online`, `DefaultPlaybackEngine(streams, store, radio, history, network, dispatcher, clock, random)` (with `attach`, `detach`, `release`, `restore`, `streamFor`) are used with identical names and signatures in Tasks 1 to 12. The engine property is `repeatMode` internally and `repeat` on `PlaybackState`.
+**Type consistency:** `PlayerOutput`, `PlayerListener`, `PlayerError`, `QueueStore`, `SavedQueue(items, originalOrder, shuffle, repeat, nextQueueId)`, `SavedPosition(index, positionMs)`, `ResolvedStream.loudnessDb`, `StreamSource.markRejected`, `RadioSource.related(seed, limit)`, `NetworkMonitor.online`, `DefaultPlaybackEngine(streams, store, radio, history, network, dispatcher, clock, random)` (with `attach`, `detach`, `release`, `restore`, `streamFor`) are used with identical names and signatures in Tasks 1 to 13. The engine property is `repeatMode` internally and `repeat` on `PlaybackState`.
+
+## Stress Test Results: playback core plan
+
+### Resolved Decisions
+- Branch 1 (debug APK exposure): manual-dispatch only, 1-day retention, maintainer downloads and deletes the run's artifact.
+- Branch 2 (stream URL scheme): `StreamUrlPolicy` allows https only (file only in the emulator test app).
+- Branch 3 (hung resolves): 20 s bounded resolve, shared in-flight resolve per track, PoToken generator timeout and mutex.
+- Branch 4 (unknowns): Task 0 research spike settles cipher-config licence, InnerTubeX and Media3 signatures before code.
+- Branch 5 (broken `:app` between tasks): Task 7 split into pure policies (7) and Media3 plus minimal real `MainActivity` (8); no shim.
+- Branch 6 (disclosed cuts): diagnostics logger deferred, in-memory toggles, `TrustPolicy` as pure unit test, cipher default may block on licence. All accepted.
+- Branch 7 (CI as only compiler): read sources first, 4-round cap per task, never weaken controls.
+
+### Changes Made
+- Task 0 added; Task 7 split; Tasks 8 to 13 renumbered to 9 to 14 (15 tasks, 0 to 14); coverage table and references updated.
+- Task 9 gains the `innertube/build.gradle.kts` `:core` dependency; manual checklist gains Bluetooth reconnect, audio focus loss and process recreation.
+- Global Constraints gain the CI iteration policy.
+
+### Deferred / Parking Lot
+- Diagnostics logger and persistent settings (sub-project 3); production cipher/registry keys; `verification-metadata.xml`; Dependabot PRs #1 and #3.
+
+### Confidence Assessment
+- Overall: Medium-high. Concern: uncompiled third-party API usage (mitigated by Task 0 and the CI policy); PoToken real-device playback stays an open release gate.
