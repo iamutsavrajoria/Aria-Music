@@ -6,6 +6,7 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.pow
 import kotlin.random.Random
 
 /**
@@ -45,6 +46,11 @@ class DefaultPlaybackEngine(
     override val events: SharedFlow<PlaybackEvent> = _events.asSharedFlow()
 
     private var tickJob: Job? = null
+
+    private var radioBusy = false
+    private var sleepJob: Job? = null
+    private var sleepEndOfTrack = false
+    private var fadeFactor = 1f
 
     private val resolved = ConcurrentHashMap<TrackId, ResolvedStream>()
     private var consecutiveFailures = 0
@@ -93,6 +99,7 @@ class DefaultPlaybackEngine(
         prefetch(model.current)
         prefetch(model.items.getOrNull(model.index + 1))
         if (model.items.isNotEmpty()) savePosition()
+        applyVolume(); maybeTopUp()
         publish()
     }
 
@@ -262,19 +269,87 @@ class DefaultPlaybackEngine(
     }
 
     override fun setRepeat(mode: RepeatMode) {
-        repeatMode = mode; output?.setRepeatOne(mode == RepeatMode.ONE); onStructureChanged()
+        repeatMode = mode; output?.setRepeatOne(mode == RepeatMode.ONE); maybeTopUp(); onStructureChanged()
     }
 
-    override fun setSleepTimer(durationMs: Long?) { /* Task 5 */ }
-    override fun setSleepAtEndOfTrack(on: Boolean) { /* Task 5 */ }
-    override fun setSkipSilence(on: Boolean) { /* Task 5 */ }
-    override fun setNormalizeLoudness(on: Boolean) { /* Task 5 */ }
-    override fun setEndlessRadio(on: Boolean) { /* Task 5 */ }
+    override fun setSkipSilence(on: Boolean) { skipSilence = on; output?.setSkipSilence(on); publish() }
+
+    override fun setNormalizeLoudness(on: Boolean) { normalizeLoudness = on; applyVolume(); publish() }
+
+    override fun setEndlessRadio(on: Boolean) { endlessRadio = on; maybeTopUp(); publish() }
+
+    override fun setSleepTimer(durationMs: Long?) {
+        cancelSleep()
+        if (durationMs == null) { publish(); return }
+        sleepTimer = SleepTimer(clock() + durationMs, endOfTrack = false)
+        sleepJob = scope.launch {
+            delay((durationMs - FADE_MS).coerceAtLeast(0L))
+            for (i in 1..FADE_STEPS) { fadeFactor = 1f - i / FADE_STEPS.toFloat(); applyVolume(); delay(FADE_MS / FADE_STEPS) }
+            pause(); fadeFactor = 1f; applyVolume(); sleepTimer = null; publish()
+        }
+        publish()
+    }
+
+    override fun setSleepAtEndOfTrack(on: Boolean) {
+        cancelSleep()
+        sleepEndOfTrack = on
+        if (on) sleepTimer = SleepTimer(null, endOfTrack = true)
+        publish()
+    }
+
+    private fun cancelSleep() {
+        sleepJob?.cancel(); sleepJob = null
+        fadeFactor = 1f; sleepEndOfTrack = false; sleepTimer = null; applyVolume()
+    }
+
+    /** Normalization only attenuates, so it can never clip (spec branch 7). */
+    private fun loudnessGain(): Float {
+        if (!normalizeLoudness) return 1f
+        val db = model.current?.let { resolved[it.track.id]?.loudnessDb } ?: return 1f
+        if (db <= 0.0) return 1f
+        return 10.0.pow(-db / 20.0).toFloat().coerceAtLeast(MIN_GAIN)
+    }
+
+    private fun applyVolume() { output?.setVolume((loudnessGain() * fadeFactor).coerceIn(0f, 1f)) }
+
+    private fun maybeTopUp() {
+        if (!endlessRadio || repeatMode != RepeatMode.OFF || radioBusy) return
+        val seed = model.current ?: return
+        if (model.items.size - model.index - 1 >= RADIO_TRIGGER) return
+        radioBusy = true
+        scope.launch {
+            try { radio.related(seed.track, RADIO_BATCH).onSuccess { appendRadio(it) } }
+            finally { radioBusy = false }
+        }
+    }
+
+    private fun appendRadio(found: List<Track>) {
+        val known = model.items.mapTo(HashSet()) { it.track.id }
+        var fresh = found.filter { known.add(it.id) }.take(RADIO_BATCH)
+        val overflow = model.items.size + fresh.size - QUEUE_CAP
+        if (overflow > 0) {
+            val drop = minOf(overflow, model.index)
+            repeat(drop) { output?.remove(0) }
+            model.dropPlayed(drop)
+            fresh = fresh.take((QUEUE_CAP - model.items.size).coerceAtLeast(0))
+        }
+        if (fresh.isEmpty()) { onStructureChanged(); return }
+        val start = model.items.size
+        model.append(fresh)
+        output?.insert(start, model.items.subList(start, model.items.size)); onStructureChanged()
+    }
+
+    /** Sleep "end of track": the player already started the next item, so pause and park it at 0. */
+    private fun applyEndOfTrackSleep(index: Int) {
+        if (!sleepEndOfTrack) return
+        sleepEndOfTrack = false; sleepTimer = null; wantPlay = false
+        output?.setPlayWhenReady(false); output?.seekTo(index, 0L); updateTicker()
+    }
 
     // ---- PlayerListener -------------------------------------------------------------------------------
     override fun onItemTransition(index: Int) {
         if (index !in model.items.indices) return
-        model.jumpTo(index); onCurrentChanged()
+        model.jumpTo(index); onCurrentChanged(); applyEndOfTrackSleep(index)
     }
 
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean) {
@@ -291,6 +366,7 @@ class DefaultPlaybackEngine(
     }
 
     override fun onEnded() {
+        sleepEndOfTrack = false; sleepTimer = null
         if (repeatMode == RepeatMode.ALL && model.items.isNotEmpty()) goTo(0, true) else stopAtEnd()
     }
 
@@ -311,6 +387,7 @@ class DefaultPlaybackEngine(
                 ?: Result.failure(java.io.IOException("Stream resolution timed out"))
         } catch (e: CancellationException) { throw e } catch (e: Exception) { Result.failure(e) }
         result.onSuccess { resolved[id] = it }
+        if (result.isSuccess) scope.launch { if (id == model.current?.track?.id) applyVolume() }
         return result
     }
 
@@ -376,6 +453,12 @@ class DefaultPlaybackEngine(
         const val RESOLVE_TIMEOUT_MS = 20_000L
         const val EXPIRY_MARGIN_MS = 60_000L
         const val MAX_CONSECUTIVE_FAILURES = 3
+        const val RADIO_TRIGGER = 5
+        const val RADIO_BATCH = 25
+        const val QUEUE_CAP = 500
+        const val FADE_MS = 5_000L
+        const val FADE_STEPS = 20
+        const val MIN_GAIN = 0.1f
         val BACKOFF_MS = longArrayOf(1_000, 2_000, 4_000)
     }
 }
