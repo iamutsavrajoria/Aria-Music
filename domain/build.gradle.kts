@@ -6,5 +6,6 @@ kotlin { jvmToolchain(21) }
 tasks.withType<Test> { useJUnit() }
 
 dependencies {
+    api(libs.coroutines.core)
     testImplementation(kotlin("test"))
 }

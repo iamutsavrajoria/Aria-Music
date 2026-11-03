@@ -15,6 +15,8 @@ data class ResolvedStream(
     val bitrate: Int,
     val contentLength: Long?,
     val expiresAtEpochMs: Long?,
+    /** dB relative to the reference loudness; positive means louder than the reference. Null when unknown. */
+    val loudnessDb: Double? = null,
 )
 
 class StreamUnavailableException(message: String) : Exception(message)
@@ -25,6 +27,18 @@ interface SearchSource {
 
 interface StreamSource {
     suspend fun resolve(id: TrackId): Result<ResolvedStream>
+
+    /** The player was refused (HTTP 403/410) using the last resolved stream; prefer a different client next time. */
+    fun markRejected(id: TrackId) {}
+}
+
+interface RadioSource {
+    /** Tracks related to [seed], at most [limit]. Failures are returned, never thrown. */
+    suspend fun related(seed: Track, limit: Int): Result<List<Track>>
+}
+
+interface NetworkMonitor {
+    val online: kotlinx.coroutines.flow.StateFlow<Boolean>
 }
 
 interface PlayEventRepository {
