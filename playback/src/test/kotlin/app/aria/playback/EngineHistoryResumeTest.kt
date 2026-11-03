@@ -13,7 +13,7 @@ class EngineHistoryResumeTest {
     }
 
     @Test fun recordedOnceAtThirtySeconds() = runTest {
-        val h = playing(Harness(testScheduler).attach())
+        val h = playing(harness().attach())
         h.advance(29_500); assertEquals(0, h.history.recorded.size)
         h.advance(1_000); assertEquals(1, h.history.recorded.size)
         h.advance(60_000); assertEquals(1, h.history.recorded.size)
@@ -21,7 +21,7 @@ class EngineHistoryResumeTest {
         h.release()
     }
     @Test fun pausedTimeDoesNotCount() = runTest {
-        val h = playing(Harness(testScheduler).attach())
+        val h = playing(harness().attach())
         h.advance(20_000); h.engine.pause(); h.advance(60_000)
         assertEquals(0, h.history.recorded.size)
         h.engine.play(); h.advance(10_500)
@@ -29,21 +29,21 @@ class EngineHistoryResumeTest {
         h.release()
     }
     @Test fun newTrackStartsANewCount() = runTest {
-        val h = playing(Harness(testScheduler).attach())
+        val h = playing(harness().attach())
         h.advance(20_000); h.engine.next(); h.engine.onBufferingChanged(false); h.advance(20_000)
         assertEquals(0, h.history.recorded.size)
         h.advance(10_500); assertEquals(1, h.history.recorded.size); assertEquals(track(2), h.history.recorded.single().first)
         h.release()
     }
     @Test fun structureSavedOnlyOnChange() = runTest {
-        val h = playing(Harness(testScheduler).attach()); val base = h.store.structureSaves
+        val h = playing(harness().attach()); val base = h.store.structureSaves
         h.advance(40_000); assertEquals(base, h.store.structureSaves)
         h.engine.addToEnd(listOf(track(9))); h.settle(); assertEquals(base + 1, h.store.structureSaves)
         assertEquals(3, h.store.saved?.items?.size)
         h.release()
     }
     @Test fun positionSavedOnPauseTrackChangeAndEveryFifteenSeconds() = runTest {
-        val h = playing(Harness(testScheduler).attach())
+        val h = playing(harness().attach())
         h.output.position = 14_000; h.advance(15_000)
         assertTrue(h.store.positionSaves.any { it.positionMs == 14_000L })
         val before = h.store.positionSaves.size
@@ -54,11 +54,11 @@ class EngineHistoryResumeTest {
         h.release()
     }
     @Test fun restoreRebuildsPausedAtSavedPosition() = runTest {
-        val a = playing(Harness(testScheduler).attach())
+        val a = playing(harness().attach())
         a.engine.setShuffle(true); a.engine.setRepeat(RepeatMode.ALL)
         a.output.position = 33_000; a.engine.pause(); a.settle(); a.release()
 
-        val b = Harness(testScheduler); b.store.saved = a.store.saved; b.store.position = a.store.position
+        val b = harness(); b.store.saved = a.store.saved; b.store.position = a.store.position
         b.attach(); b.engine.restore(); b.settle()
         assertEquals(a.state.queue.map { it.queueId }, b.state.queue.map { it.queueId })
         assertTrue(b.state.shuffle); assertEquals(RepeatMode.ALL, b.state.repeat)
@@ -67,7 +67,7 @@ class EngineHistoryResumeTest {
         b.release()
     }
     @Test fun restoreIgnoredWhenQueueAlreadyExists() = runTest {
-        val h = Harness(testScheduler).attach(); h.engine.playNow(listOf(track(1)))
+        val h = harness().attach(); h.engine.playNow(listOf(track(1)))
         h.store.saved = SavedQueue(listOf(QueueItem(5, track(5))), listOf(5), false, RepeatMode.OFF, 6)
         h.store.position = SavedPosition(0, 0); h.engine.restore()
         assertEquals("T1", h.state.current?.track?.title)

@@ -3,9 +3,11 @@ package app.aria.playback
 
 import app.aria.domain.*
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
+import kotlinx.coroutines.test.TestScope
 import kotlin.random.Random
 
 class FakeOutput : PlayerOutput {
@@ -97,4 +99,9 @@ class Harness(val scheduler: TestCoroutineScheduler) {
     fun settle() = scheduler.runCurrent()
     fun release() = engine.release()
     val state get() = engine.state.value
+}
+
+/** Releases the engine when the test ends, even after a failed assertion: a leaked ticker would otherwise keep runTest draining virtual time forever. */
+fun TestScope.harness(): Harness = Harness(testScheduler).also { h ->
+    backgroundScope.coroutineContext[Job]!!.invokeOnCompletion { h.release() }
 }
