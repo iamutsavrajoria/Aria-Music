@@ -6,7 +6,7 @@ Date: 2026-10-30. Task 0 of the foundation plan. Findings come from public pages
 
 - InnerTubeX (`MetrolistGroup/innertubex`) is **GPL-3.0**, shown on its [repository page](https://github.com/MetrolistGroup/innertubex) with a link to its LICENSE file. The page does not say whether the grant is `-only` or `-or-later`.
 - Aria is `GPL-3.0-only`. Using a GPL-3.0 library is compatible with that. If the library turns out to be `-only`, it is also compatible; if `-or-later`, Aria's `-only` still holds.
-- **Not yet confirmed:** the LICENSE file text and SPDX headers in the source, because `raw.githubusercontent.com` is blocked from the shell. Action for Task 8: read the LICENSE and a source header through WebFetch or a browser once and record the variant here before Task 8 starts.
+- **Read 2026-11-03** (tag `v0.5.2`, commit `93b650b877530738cbc4d2183b4322b77bb9033e`, details in [2026-11-playback-apis.md](2026-11-playback-apis.md) item 1b): `LICENSE` is the unmodified FSF GPLv3 text; the README badge says "GPL-3.0"; the published POM says "GNU General Public License, version 3"; no source file has a license header or SPDX line, and no "or any later version" notice applies to the library. So the variant is **not declared**; the best-supported reading is `GPL-3.0-only`. Either variant is compatible with Aria's `GPL-3.0-only`. Left open: whether to accept "undeclared, version 3" as the recorded answer for the release gate.
 - Pinning: the README says `0.x` releases are experimental and advises pinning exact versions and reading the CHANGELOG before upgrading. Meld pins `0.5.2`; Aria pins the same.
 
 ## 2. Store policy on a JitPack-hosted dependency
