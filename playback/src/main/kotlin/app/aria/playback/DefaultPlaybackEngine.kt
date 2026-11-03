@@ -3,6 +3,7 @@ package app.aria.playback
 
 import app.aria.domain.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.*
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.random.Random
@@ -53,6 +54,18 @@ class DefaultPlaybackEngine(
 
     private val inFlight = ConcurrentHashMap<TrackId, Deferred<Result<ResolvedStream>>>()
 
+    private var listenedMs = 0L
+    private var recorded = false
+    private var sinceSaveMs = 0L
+    private val structureSaves = Channel<SavedQueue>(Channel.CONFLATED)
+    private val positionSaves = Channel<SavedPosition>(Channel.CONFLATED)
+
+    init {
+        // Single writers per channel: saves are serialized and the latest value wins.
+        scope.launch { for (s in structureSaves) runCatching { store.saveStructure(s) } }
+        scope.launch { for (p in positionSaves) runCatching { store.savePosition(p) } }
+    }
+
     private fun status(): PlaybackStatus = when {
         errorMsg != null -> PlaybackStatus.Error(errorMsg!!)
         model.items.isEmpty() -> PlaybackStatus.Idle
@@ -74,15 +87,17 @@ class DefaultPlaybackEngine(
     // ---- hooks extended by later tasks -------------------------------------------------------------
     /** The current track changed (command, transition or skip). */
     private fun onCurrentChanged() {
+        listenedMs = 0L; recorded = false; sinceSaveMs = 0L
         retryJob?.cancel(); waiting = false; retryCount = 0; refreshTried = false
         positionMs = 0L
         prefetch(model.current)
         prefetch(model.items.getOrNull(model.index + 1))
+        if (model.items.isNotEmpty()) savePosition()
         publish()
     }
 
     /** Queue items, order, shuffle or repeat changed. */
-    private fun onStructureChanged() { publish() }
+    private fun onStructureChanged() { structureSaves.trySend(snapshot()); publish() }
 
     // ---- lifecycle -----------------------------------------------------------------------------------
     fun attach(out: PlayerOutput) {
@@ -94,7 +109,7 @@ class DefaultPlaybackEngine(
 
     fun detach(out: PlayerOutput) {
         if (output !== out) return
-        positionMs = out.positionMs(); out.listener = null; output = null
+        positionMs = out.positionMs(); savePosition(); out.listener = null; output = null
         wantPlay = false; buffering = false; updateTicker(); publish()
     }
 
@@ -109,7 +124,38 @@ class DefaultPlaybackEngine(
     private fun onTick() {
         val out = output ?: return
         positionMs = out.positionMs()
+        if (status() == PlaybackStatus.Playing) {
+            listenedMs += TICK_MS; sinceSaveMs += TICK_MS
+            if (!recorded && listenedMs >= HISTORY_THRESHOLD_MS) { recorded = true; recordPlay() }
+            if (sinceSaveMs >= POSITION_SAVE_MS) savePosition()
+        }
         publish()
+    }
+
+    private fun recordPlay() {
+        val track = model.current?.track ?: return
+        val played = listenedMs; val startedAt = clock() - played
+        scope.launch { runCatching { history.record(track, startedAt, played) } }
+    }
+
+    private fun savePosition() {
+        sinceSaveMs = 0L
+        if (model.items.isEmpty()) return
+        positionSaves.trySend(SavedPosition(model.index, positionMs))
+    }
+
+    private fun snapshot() = SavedQueue(model.items, model.originalOrder, model.shuffle, repeatMode, model.nextId)
+
+    suspend fun restore() {
+        if (model.items.isNotEmpty()) return
+        val saved = runCatching { store.load() }.getOrNull() ?: return
+        if (model.items.isNotEmpty()) return            // a command arrived while loading
+        model.restore(saved.queue, saved.position.index)
+        repeatMode = saved.queue.repeat; positionMs = saved.position.positionMs
+        wantPlay = false; buffering = false
+        output?.setRepeatOne(repeatMode == RepeatMode.ONE)
+        if (model.items.isNotEmpty()) output?.setPlaylist(model.items, model.index, positionMs, false)
+        updateTicker(); publish()
     }
 
     // ---- queue commands -------------------------------------------------------------------------------
@@ -171,7 +217,9 @@ class DefaultPlaybackEngine(
     }
 
     override fun pause() {
-        wantPlay = false; output?.setPlayWhenReady(false); updateTicker(); publish()
+        wantPlay = false; output?.setPlayWhenReady(false)
+        positionMs = output?.positionMs() ?: positionMs; savePosition()
+        updateTicker(); publish()
     }
 
     private fun nextIndexOrNull(): Int? = when {
@@ -231,7 +279,9 @@ class DefaultPlaybackEngine(
 
     override fun onPlayWhenReadyChanged(playWhenReady: Boolean) {
         if (wantPlay == playWhenReady) return
-        wantPlay = playWhenReady; updateTicker(); publish()
+        wantPlay = playWhenReady
+        if (!playWhenReady) { positionMs = output?.positionMs() ?: positionMs; savePosition() }
+        updateTicker(); publish()
     }
 
     override fun onBufferingChanged(buffering: Boolean) {
@@ -321,6 +371,8 @@ class DefaultPlaybackEngine(
     companion object {
         const val TICK_MS = 500L
         const val PREVIOUS_RESTART_MS = 3_000L
+        const val HISTORY_THRESHOLD_MS = 30_000L
+        const val POSITION_SAVE_MS = 15_000L
         const val RESOLVE_TIMEOUT_MS = 20_000L
         const val EXPIRY_MARGIN_MS = 60_000L
         const val MAX_CONSECUTIVE_FAILURES = 3
