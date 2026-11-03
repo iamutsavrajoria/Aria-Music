@@ -4,6 +4,7 @@ package app.aria.playback
 import app.aria.domain.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.*
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.random.Random
 
 /**
@@ -44,6 +45,14 @@ class DefaultPlaybackEngine(
 
     private var tickJob: Job? = null
 
+    private val resolved = ConcurrentHashMap<TrackId, ResolvedStream>()
+    private var consecutiveFailures = 0
+    private var retryCount = 0
+    private var refreshTried = false
+    private var retryJob: Job? = null
+
+    private val inFlight = ConcurrentHashMap<TrackId, Deferred<Result<ResolvedStream>>>()
+
     private fun status(): PlaybackStatus = when {
         errorMsg != null -> PlaybackStatus.Error(errorMsg!!)
         model.items.isEmpty() -> PlaybackStatus.Idle
@@ -64,7 +73,13 @@ class DefaultPlaybackEngine(
 
     // ---- hooks extended by later tasks -------------------------------------------------------------
     /** The current track changed (command, transition or skip). */
-    private fun onCurrentChanged() { positionMs = 0L; publish() }
+    private fun onCurrentChanged() {
+        retryJob?.cancel(); waiting = false; retryCount = 0; refreshTried = false
+        positionMs = 0L
+        prefetch(model.current)
+        prefetch(model.items.getOrNull(model.index + 1))
+        publish()
+    }
 
     /** Queue items, order, shuffle or repeat changed. */
     private fun onStructureChanged() { publish() }
@@ -151,7 +166,7 @@ class DefaultPlaybackEngine(
     // ---- transport ------------------------------------------------------------------------------------
     override fun play() {
         if (model.items.isEmpty()) return
-        if (errorMsg != null) { goTo(model.index, true); return }
+        if (errorMsg != null) { consecutiveFailures = 0; goTo(model.index, true); return }
         wantPlay = true; output?.setPlayWhenReady(true); updateTicker(); publish()
     }
 
@@ -219,16 +234,96 @@ class DefaultPlaybackEngine(
         wantPlay = playWhenReady; updateTicker(); publish()
     }
 
-    override fun onBufferingChanged(buffering: Boolean) { this.buffering = buffering; publish() }
+    override fun onBufferingChanged(buffering: Boolean) {
+        this.buffering = buffering
+        if (!buffering && wantPlay) { consecutiveFailures = 0; retryCount = 0 }
+        publish()
+    }
 
     override fun onEnded() {
         if (repeatMode == RepeatMode.ALL && model.items.isNotEmpty()) goTo(0, true) else stopAtEnd()
     }
 
-    override fun onError(error: PlayerError) { errorMsg = "Playback error"; wantPlay = false; updateTicker(); publish() }
+    /**
+     * Thread-safe: also called from ExoPlayer's loader thread by the Media3 adapter. Bounded by [RESOLVE_TIMEOUT_MS]
+     * and de-duplicated per track (prefetch and the loader share one resolve). A timeout is an ordinary IOException,
+     * so the engine retries it as transient.
+     */
+    suspend fun streamFor(id: TrackId): Result<ResolvedStream> {
+        resolved[id]?.takeIf { !it.isExpired() }?.let { return Result.success(it) }
+        val job = inFlight.computeIfAbsent(id) { scope.async(workDispatcher, CoroutineStart.LAZY) { resolveBounded(id) } }
+        return try { job.await() } finally { inFlight.remove(id, job) }
+    }
+
+    private suspend fun resolveBounded(id: TrackId): Result<ResolvedStream> {
+        val result = try {
+            withTimeoutOrNull(RESOLVE_TIMEOUT_MS) { streams.resolve(id) }
+                ?: Result.failure(java.io.IOException("Stream resolution timed out"))
+        } catch (e: CancellationException) { throw e } catch (e: Exception) { Result.failure(e) }
+        result.onSuccess { resolved[id] = it }
+        return result
+    }
+
+    private fun ResolvedStream.isExpired(): Boolean {
+        val expires = expiresAtEpochMs ?: return false
+        return expires - EXPIRY_MARGIN_MS <= clock()
+    }
+
+    private fun prefetch(item: QueueItem?) { if (item != null) scope.launch { streamFor(item.track.id) } }
+
+    private fun reload() { output?.retry(output?.positionMs() ?: positionMs) }
+
+    override fun onError(error: PlayerError) {
+        val item = model.current ?: return
+        retryJob?.cancel()
+        when (error) {
+            PlayerError.Permanent -> skipAfterFailure(item, "unavailable")
+            is PlayerError.Http ->
+                if ((error.code == 403 || error.code == 410) && !refreshTried) {
+                    refreshTried = true
+                    resolved.remove(item.track.id); streams.markRejected(item.track.id)
+                    reload()
+                } else transient(item)
+            PlayerError.Io -> transient(item)
+        }
+    }
+
+    private fun transient(item: QueueItem) {
+        if (!network.online.value) { waitForNetwork(); return }
+        if (retryCount >= BACKOFF_MS.size) { skipAfterFailure(item, "network error"); return }
+        val wait = BACKOFF_MS[retryCount++]
+        retryJob = scope.launch { delay(wait); reload() }
+    }
+
+    private fun waitForNetwork() {
+        waiting = true; updateTicker(); publish()
+        retryJob = scope.launch {
+            network.online.first { it }
+            waiting = false; updateTicker(); reload(); publish()
+        }
+    }
+
+    private fun skipAfterFailure(item: QueueItem, reason: String) {
+        retryCount = 0
+        consecutiveFailures++
+        _events.tryEmit(PlaybackEvent.Skipped(item.track, reason))
+        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+            val msg = "Stopped after $MAX_CONSECUTIVE_FAILURES tracks failed in a row"
+            errorMsg = msg; wantPlay = false; buffering = false
+            output?.setPlayWhenReady(false); updateTicker()
+            _events.tryEmit(PlaybackEvent.Stopped(msg)); publish(); return
+        }
+        val target = nextIndexOrNull()
+        if (target != null) goTo(target, true) else stopAtEnd()
+    }
+
 
     companion object {
         const val TICK_MS = 500L
         const val PREVIOUS_RESTART_MS = 3_000L
+        const val RESOLVE_TIMEOUT_MS = 20_000L
+        const val EXPIRY_MARGIN_MS = 60_000L
+        const val MAX_CONSECUTIVE_FAILURES = 3
+        val BACKOFF_MS = longArrayOf(1_000, 2_000, 4_000)
     }
 }
