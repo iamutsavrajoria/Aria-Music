@@ -1825,7 +1825,7 @@ class PlayerErrorMapperTest {
 
 - [ ] **Step 2:** Push. Expected: FAIL (classes missing).
 
-- [ ] **Step 3: Implement.** `playback/build.gradle.kts`: add `testImplementation(kotlin("test"))` (if not yet), `testImplementation(libs.robolectric)`, `testImplementation(libs.androidx.test.core)`; `implementation(libs.media3.datasource)` is not needed (ExoPlayer brings `media3-datasource`; if the compiler cannot see `ResolvingDataSource`, add the catalog alias `media3-datasource = androidx.media3:media3-datasource` and use it). Add `src/test/resources/robolectric.properties` with `sdk=35`.
+- [ ] **Step 3: Implement.** `playback/build.gradle.kts`: add `testImplementation(kotlin("test-junit"))` (plain `kotlin("test")` does not resolve `kotlin.test.Test` in this Android module, per Task 2 CI) (if not yet), `testImplementation(libs.robolectric)`, `testImplementation(libs.androidx.test.core)`; `implementation(libs.media3.datasource)` is not needed (ExoPlayer brings `media3-datasource`; if the compiler cannot see `ResolvingDataSource`, add the catalog alias `media3-datasource = androidx.media3:media3-datasource` and use it). Add `src/test/resources/robolectric.properties` with `sdk=35`.
 
 ```kotlin
 // PlaybackEngineProvider.kt
