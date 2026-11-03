@@ -20,6 +20,7 @@ dependencies {
     implementation(libs.media3.session)
     implementation(libs.media3.okhttp)
     implementation(libs.coroutines.core)
+    testImplementation(kotlin("test"))
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.test)
 }
