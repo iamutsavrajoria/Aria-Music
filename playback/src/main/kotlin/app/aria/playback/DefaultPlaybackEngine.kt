@@ -318,8 +318,10 @@ class DefaultPlaybackEngine(
         if (model.items.size - model.index - 1 >= RADIO_TRIGGER) return
         radioBusy = true
         scope.launch {
-            try { radio.related(seed.track, RADIO_BATCH).onSuccess { appendRadio(it) } }
-            finally { radioBusy = false }
+            try {
+                // The mode may have changed between launching and running; honor the latest setting.
+                if (endlessRadio && repeatMode == RepeatMode.OFF) radio.related(seed.track, RADIO_BATCH).onSuccess { appendRadio(it) }
+            } finally { radioBusy = false }
         }
     }
 
@@ -343,7 +345,7 @@ class DefaultPlaybackEngine(
     private fun applyEndOfTrackSleep(index: Int) {
         if (!sleepEndOfTrack) return
         sleepEndOfTrack = false; sleepTimer = null; wantPlay = false
-        output?.setPlayWhenReady(false); output?.seekTo(index, 0L); updateTicker()
+        output?.setPlayWhenReady(false); output?.seekTo(index, 0L); updateTicker(); publish()
     }
 
     // ---- PlayerListener -------------------------------------------------------------------------------
