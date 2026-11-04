@@ -1919,7 +1919,7 @@ object PlayerErrorMapper {
 - `PlaybackHost`, `PlayerController`, the 500 ms delay and every `TODO(sub-project 2)` in `:playback` are gone.
 - `AriaApp` implements `PlaybackEngineProvider` with the injected engine and calls `engine.restore()` once at startup on the main thread.
 - `ACCESS_NETWORK_STATE` is declared. Both flavors assemble; `checkModuleGraph`, lint and the license check pass.
-- `RadioSource` is bound to an empty stand-in in `:app` (endless radio is off by default); Task 12 replaces it with `YouTubeRadioSource`.
+- `RadioSource` is bound to an empty stand-in in `:app` (it returns no tracks, so endless radio, which defaults to on, finds nothing until then); Task 12 replaces it with `YouTubeRadioSource`.
 
 - [ ] **Step 1: Build check (no new JVM test: the adapter is exercised by the emulator tests in Task 13).** Push the compile of the code below.
 
