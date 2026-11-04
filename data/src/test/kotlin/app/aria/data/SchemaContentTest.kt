@@ -32,9 +32,9 @@ class SchemaContentTest {
         assertEquals(expected, names())
     }
 
-    @Test fun hasTwentyThreeTablesAndThreeViews() {
+    @Test fun hasTwentyFiveTablesAndThreeViews() {
         val n = names()
-        assertEquals(23, n.count { it.startsWith("table:") })
+        assertEquals(25, n.count { it.startsWith("table:") })
         assertEquals(3, n.count { it.startsWith("view:") })
     }
 

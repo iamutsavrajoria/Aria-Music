@@ -9,6 +9,8 @@ table:playCount
 table:playlist
 table:playlist_song_map
 table:podcast
+table:queue_item
+table:queue_state
 table:recognition_history
 table:recommendation_exclusions
 table:related_song_map

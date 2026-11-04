@@ -16,6 +16,8 @@ import app.aria.data.entities.PlaylistEntity
 import app.aria.data.entities.PlaylistSongMap
 import app.aria.data.entities.PlaylistSongMapPreview
 import app.aria.data.entities.PodcastEntity
+import app.aria.data.entities.QueueItemEntity
+import app.aria.data.entities.QueueStateEntity
 import app.aria.data.entities.RecognitionHistory
 import app.aria.data.entities.RecommendationExclusionEntity
 import app.aria.data.entities.RelatedSongMap
@@ -36,7 +38,7 @@ import app.aria.data.entities.TrackMatchEntity
  * freely; from the first beta on it is frozen and every change needs a tested migration.
  * Release builds must never use destructive migration fallback.
  *
- * Tables: 23 (21 ported from Echo, `podcast` from Meld, plus Aria's `track_match`) and 3 views. Meld's
+ * Tables: 25 (21 ported from Echo, `podcast` from Meld, plus Aria's `track_match`, `queue_item` and `queue_state`) and 3 views. Meld's
  * `ArtistPageCache.kt` is not a table (plain serialization DTOs) and is not ported here.
  */
 @Database(
@@ -47,6 +49,7 @@ import app.aria.data.entities.TrackMatchEntity
         RelatedSongMap::class, SearchHistory::class, SpeedDialItem::class, SetVideoIdEntity::class,
         RecognitionHistory::class, BeatInfoEntity::class, RecommendationExclusionEntity::class,
         SongPlayStatsEntity::class, TasteProfileEntity::class, PodcastEntity::class,
+        QueueItemEntity::class, QueueStateEntity::class,
     ],
     views = [SortedSongArtistMap::class, SortedSongAlbumMap::class, PlaylistSongMapPreview::class],
     version = 1,
@@ -56,4 +59,5 @@ import app.aria.data.entities.TrackMatchEntity
 abstract class AriaDatabase : RoomDatabase() {
     abstract fun trackMatchDao(): TrackMatchDao
     abstract fun playEventDao(): PlayEventDao
+    abstract fun queueDao(): QueueDao
 }
