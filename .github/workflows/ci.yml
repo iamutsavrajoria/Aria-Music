@@ -40,6 +40,11 @@ jobs:
         run: |
           out="$(git status --porcelain -- data/schemas)"
           if [ -n "$out" ]; then echo "Room schema changed or uncommitted:"; echo "$out"; exit 1; fi
+      - name: Print schema as annotations when it changed
+        if: failure()
+        run: |
+          f="$(find data/schemas -name 1.json | head -1)"
+          gzip -9 -c "$f" | base64 -w0 | fold -w 3000 | awk '{ printf "::error title=schema-%03d::%s\n", NR, $0 }'
       - name: Upload schema when it changed
         if: failure()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
