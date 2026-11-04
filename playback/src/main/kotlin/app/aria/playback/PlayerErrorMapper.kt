@@ -9,7 +9,7 @@ import java.io.IOException
 /** The resolver found the stream permanently unavailable. Thrown inside ResolvingDataSource. */
 class PermanentStreamException(cause: Throwable) : IOException(cause)
 
-@OptIn(UnstableApi::class)
+@androidx.annotation.OptIn(UnstableApi::class)
 object PlayerErrorMapper {
     fun map(error: Throwable): PlayerError {
         var t: Throwable? = error; var depth = 0
