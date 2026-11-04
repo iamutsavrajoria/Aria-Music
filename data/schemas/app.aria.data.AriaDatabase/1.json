@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 1,
-    "identityHash": "97936bb8dbba96b06058d60cbb2835be",
+    "identityHash": "ec3764b5ce2b2e96ff4b3532928da96e",
     "entities": [
       {
         "tableName": "track_match",
@@ -1589,6 +1589,112 @@
             "id"
           ]
         }
+      },
+      {
+        "tableName": "queue_item",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`queueId` INTEGER NOT NULL, `position` INTEGER NOT NULL, `originalPosition` INTEGER NOT NULL, `trackId` TEXT NOT NULL, `title` TEXT NOT NULL, `artists` TEXT NOT NULL, `durationMs` INTEGER, `thumbnailUrl` TEXT, PRIMARY KEY(`queueId`))",
+        "fields": [
+          {
+            "fieldPath": "queueId",
+            "columnName": "queueId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "position",
+            "columnName": "position",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "originalPosition",
+            "columnName": "originalPosition",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "trackId",
+            "columnName": "trackId",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "title",
+            "columnName": "title",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "artists",
+            "columnName": "artists",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "durationMs",
+            "columnName": "durationMs",
+            "affinity": "INTEGER"
+          },
+          {
+            "fieldPath": "thumbnailUrl",
+            "columnName": "thumbnailUrl",
+            "affinity": "TEXT"
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "queueId"
+          ]
+        }
+      },
+      {
+        "tableName": "queue_state",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER NOT NULL, `shuffle` INTEGER NOT NULL, `repeat` TEXT NOT NULL, `nextQueueId` INTEGER NOT NULL, `currentIndex` INTEGER NOT NULL, `positionMs` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "shuffle",
+            "columnName": "shuffle",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "repeat",
+            "columnName": "repeat",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "nextQueueId",
+            "columnName": "nextQueueId",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "currentIndex",
+            "columnName": "currentIndex",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "positionMs",
+            "columnName": "positionMs",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "id"
+          ]
+        }
       }
     ],
     "views": [
@@ -1607,7 +1713,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '97936bb8dbba96b06058d60cbb2835be')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'ec3764b5ce2b2e96ff4b3532928da96e')"
     ]
   }
 }
