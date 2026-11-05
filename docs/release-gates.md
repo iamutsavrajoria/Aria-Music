@@ -8,6 +8,7 @@ Unchecked boxes are open. Source: the foundation design spec and plan; status as
 - [ ] Final package ID chosen, tied to a domain or account the maintainer controls; `aria.properties` updated. `app.aria.music` is a placeholder.
 - [ ] Repo on an account with 2FA; Codeberg mirror configured; APK signing key backed up offline. (The repo is public at https://github.com/iamutsavrajoria/Aria-Music.)
 - [ ] Non-affiliation notice present in README and the About screen. README has it; there is no About screen yet.
+- [ ] Cipher config: generate production Ed25519 key(s), host the signed config at an Aria-controlled URL, embed the public key(s), then enable `CipherConfigUpdater` (disabled in the alpha; extractor hot-fixes between app releases need this). InnerTubeX v0.5.2 ignores injected cipher configs; signed config is staged until a later release.
 
 ## Before the first beta
 - [ ] Gradle dependency verification: generate and commit `gradle/verification-metadata.xml` (not yet generated; CI does not require it yet). Needs network access:

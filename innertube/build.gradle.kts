@@ -32,6 +32,7 @@ tasks.withType<Test>().configureEach {
 
 dependencies {
     api(project(":domain"))
+    implementation(project(":core"))
     if (providers.gradleProperty("useMavenLocalInnerTubeX").isPresent) {
         api("com.github.MetrolistGroup:innertubex:${libs.versions.innertubex.get()}")
     } else {
@@ -45,6 +46,8 @@ dependencies {
     implementation(libs.timber)
     testImplementation(libs.junit)
     testImplementation(libs.coroutines.core)
+    testImplementation(libs.coroutines.test)
+    testImplementation(libs.tink.android)
 
     coreLibraryDesugaring(libs.desugaring)
 }
