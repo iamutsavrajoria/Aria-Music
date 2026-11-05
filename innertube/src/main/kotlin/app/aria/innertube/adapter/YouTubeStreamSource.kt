@@ -6,26 +6,33 @@ import app.aria.domain.StreamSource
 import app.aria.domain.StreamUnavailableException
 import app.aria.domain.TrackId
 import app.aria.domain.TrackSource
-import app.aria.innertube.YouTube
-import com.metrolist.innertubex.models.YouTubeClient
+import app.aria.innertube.extraction.AudioExtractor
+import app.aria.innertube.extraction.ExtractorSession
+import app.aria.innertube.extraction.FailedClientMemory
 
-/**
- * Skeleton resolver: asks the ANDROID_MUSIC client for the player response and takes a direct audio
- * URL. Formats that need signature deciphering or a PoToken are not handled here; they surface as
- * StreamUnavailableException and are covered later by the playback sub-project.
- */
-class YouTubeStreamSource(private val clock: () -> Long = System::currentTimeMillis) : StreamSource {
+class YouTubeStreamSource(
+    private val extractor: AudioExtractor,
+    private val memory: FailedClientMemory,
+    private val clock: () -> Long = System::currentTimeMillis,
+) : StreamSource {
+    private val lastClient = java.util.concurrent.ConcurrentHashMap<TrackId, String>()
+
     override suspend fun resolve(id: TrackId): Result<ResolvedStream> = runCatching {
         require(id.source == TrackSource.YOUTUBE) { "Not a YouTube track: $id" }
-        val response = YouTube.player(id.value, client = YouTubeClient.ANDROID_MUSIC).getOrThrow()
-        val data = response.streamingData ?: throw StreamUnavailableException("No streaming data for $id")
-        val best = data.bestAudio() ?: throw StreamUnavailableException("No direct audio URL for $id")
-        ResolvedStream(
-            url = best.url!!,
-            mimeType = best.mimeType,
-            bitrate = best.bitrate,
-            contentLength = best.contentLength,
-            expiresAtEpochMs = clock() + data.expiresInSeconds * 1000L,
-        )
+        val audio = extractor.extract(id.value, memory.failed(id.value))
+        if (!audio.url.startsWith("https://")) throw StreamUnavailableException("Extractor returned a non-https stream URL")
+        lastClient[id] = audio.client
+        val stream = audio.toResolvedStream()
+        stream.copy(expiresAtEpochMs = stream.expiresAtEpochMs ?: (clock() + DEFAULT_TTL_MS))
+    }
+
+    override fun markRejected(id: TrackId) {
+        lastClient[id]?.let { memory.record(id.value, it) }
+    }
+
+    companion object {
+        const val DEFAULT_TTL_MS = 300_000L
+        fun create(session: ExtractorSession) =
+            YouTubeStreamSource(session.audioExtractor(), FailedClientMemory(clock = System::currentTimeMillis))
     }
 }

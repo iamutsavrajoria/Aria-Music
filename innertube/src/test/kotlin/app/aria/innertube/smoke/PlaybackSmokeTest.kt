@@ -3,6 +3,7 @@ package app.aria.innertube.smoke
 
 import app.aria.domain.TrackId
 import app.aria.innertube.adapter.YouTubeStreamSource
+import app.aria.innertube.extraction.ExtractorSession
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Assume.assumeTrue
@@ -14,7 +15,7 @@ class PlaybackSmokeTest {
 
     @Test fun fixedPublicTracksResolveToAnAudioUrl() = runBlocking {
         assumeTrue(System.getProperty("aria.smoke") == "true")
-        val source = YouTubeStreamSource()
+        val source = YouTubeStreamSource.create(ExtractorSession.createDefault(poTokens = null))
         val failures = ids.filter { id -> source.resolve(TrackId.youtube(id)).isFailure }
         assertTrue("Could not resolve: $failures", failures.isEmpty())
     }

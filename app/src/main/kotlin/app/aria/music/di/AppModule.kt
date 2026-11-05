@@ -16,6 +16,7 @@ import app.aria.domain.StreamSource
 import app.aria.domain.Track
 import app.aria.innertube.adapter.YouTubeSearchSource
 import app.aria.innertube.adapter.YouTubeStreamSource
+import app.aria.innertube.extraction.ExtractorSession
 import app.aria.music.ConnectivityNetworkMonitor
 import app.aria.playback.DefaultPlaybackEngine
 import dagger.Module
@@ -35,7 +36,8 @@ object AppModule {
 
     @Provides @Singleton fun playEvents(db: AriaDatabase): PlayEventRepository = PlayEventRepositoryImpl(db.playEventDao())
     @Provides @Singleton fun search(): SearchSource = YouTubeSearchSource()
-    @Provides @Singleton fun streams(): StreamSource = YouTubeStreamSource()
+    @Provides @Singleton fun streams(): StreamSource =
+        YouTubeStreamSource.create(ExtractorSession.createDefault(poTokens = null)) // temporary; Task 12 replaces
     @Provides @Singleton fun network(@ApplicationContext c: Context): NetworkMonitor = ConnectivityNetworkMonitor(c)
     @Provides @Singleton fun queueStore(db: AriaDatabase): QueueStore = QueueStoreImpl(db.queueDao())
 
