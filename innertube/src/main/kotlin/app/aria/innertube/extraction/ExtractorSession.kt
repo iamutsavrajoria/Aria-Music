@@ -60,7 +60,7 @@ class ExtractorSession(
                 tokenProvider = tokenProvider(),
                 logger = logger,
             )
-            Bundle(latest.generation, cipherService, extractor).also { current = it }
+            Bundle(latest.generation, cipherService, extractor).also { current = it }.extractor
         }
     }
 
