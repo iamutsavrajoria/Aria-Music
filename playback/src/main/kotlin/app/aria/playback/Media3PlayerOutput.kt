@@ -3,7 +3,6 @@ package app.aria.playback
 
 import android.content.Context
 import android.net.Uri
-import androidx.core.net.toUri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -63,7 +62,7 @@ class Media3PlayerOutput(
         if (!StreamUrlPolicy.isAllowed(stream.url, allowLocalStreams)) {
             throw PermanentStreamException(IllegalStateException("unsupported stream scheme"))
         }
-        return spec.withUri(stream.url.toUri())
+        return spec.withUri(Uri.parse(stream.url))
     }
 
     private fun item(q: QueueItem): MediaItem = MediaItem.Builder()
@@ -72,7 +71,7 @@ class Media3PlayerOutput(
         .setMediaMetadata(
             MediaMetadata.Builder()
                 .setTitle(q.track.title).setArtist(q.track.artists.joinToString())
-                .setArtworkUri(q.track.thumbnailUrl?.toUri())
+                .setArtworkUri(q.track.thumbnailUrl?.let { Uri.parse(it) })
                 .setIsPlayable(true).setIsBrowsable(false)
                 .build(),
         ).build()
