@@ -1,13 +1,14 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 # Release gates
 
-Unchecked boxes are open. Source: the foundation design spec and plan; status as of 2026-11-01 (walking skeleton).
+Unchecked boxes are open. Source: the foundation and playback-core design specs and plans; status as of 2026-11-07 (playback core).
 
 ## Before the first public build (alphas included)
 - [ ] Final app name chosen; trademark and store-name check done (GitHub, F-Droid, Play, trademark search). "Aria" is crowded; the name is a placeholder.
 - [ ] Final package ID chosen, tied to a domain or account the maintainer controls; `aria.properties` updated. `app.aria.music` is a placeholder.
 - [ ] Repo on an account with 2FA; Codeberg mirror configured; APK signing key backed up offline. (The repo is public at https://github.com/iamutsavrajoria/Aria-Music.)
 - [ ] Non-affiliation notice present in README and the About screen. README has it; there is no About screen yet.
+- [ ] Any APK (even a debug build) shared outside the maintainer is a public build: make the repo private first or clear every gate above. Debug-APK artifacts on this public repo are downloadable by anyone signed in to GitHub.
 - [ ] Cipher config: generate production Ed25519 key(s), host the signed config at an Aria-controlled URL, embed the public key(s), then enable `CipherConfigUpdater` (disabled in the alpha; extractor hot-fixes between app releases need this). InnerTubeX v0.5.2 ignores injected cipher configs; signed config is staged until a later release.
 
 ## Before the first beta
@@ -28,4 +29,4 @@ Unchecked boxes are open. Source: the foundation design spec and plan; status as
 - [ ] IzzyOnDroid and F-Droid metadata and review requirements met.
 - [ ] Spotify registry signing key stored only in CI secrets, separate from the APK key; two public keys embedded.
 - [ ] Discord presence: auth flow read and classified, or feature left out (spec 7.2).
-- [ ] PoToken generation for YouTube playback exists, or the unavailable-stream behaviour is accepted (sub-project 2).
+- [ ] PoToken generation exists (implemented in sub-project 2); closes after the maintainer confirms real playback on a device with a debug build ([manual-device-checklist.md](manual-device-checklist.md)).

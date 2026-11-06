@@ -8,6 +8,7 @@ Nothing is sent to the Aria project. The foundation has no telemetry, analytics,
 | Provider | Data | When | Opt-in |
 |---|---|---|---|
 | YouTube Music (via InnerTubeX) | Search text, video IDs, and the device/client identifiers the client library sends | On search and on playback only | No (core feature) |
+| YouTube Music, radio (same provider) | The video ID of the track playing, sent as a `next` request for related tracks | When endless radio is on, repeat is off and the queue is running out. The toggle is on by default, shown on the player screen and not saved between runs | Can be turned off on the player screen |
 | YouTube BotGuard challenge (PoToken generator, same provider) | Visitor data and a BotGuard challenge request, sent from the device to `www.youtube.com` (Google); the token is minted by a hidden, confined WebView on the device. No Aria server is involved | On first playback and again when the token expires (the integrity token lives for hours; Aria keeps the last token pair only in memory) | No (needed to play streams that require a PoToken) |
 
 Not sent anywhere: crash reports (written to `files/crash/` on the device only; the query string of every URL, tokens, cookies and authorization headers are removed first), play history and library data (stored locally in Room).

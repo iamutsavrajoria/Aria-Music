@@ -99,7 +99,7 @@ Run 2026-11-02, Mode A (edits applied inline). Seven branches, all agreed, all c
 | 2 | Service wiring | `:playback` has no Hilt, so "attach to the singleton" had no mechanism and the service test could not use fakes | `PlaybackEngineProvider` implemented by the Application; `:playback` androidTest with a test Application; tiny Hilt test in `:app` |
 | 3 | WebView security | Remote BotGuard script in an unconfined WebView is an attack surface | Hidden, origin-restricted WebView, one narrow validated bridge, no file access, destroyed after use, static CI check, data-flow note |
 | 4 | Cipher config trust | Repo-hosted config is writable by anyone with repo or token access and steers the extractor | Ed25519-signed, strictly validated updates; disabled until production keys exist; bundled default |
-| 5 | Debug APK vs name gate | A public pre-release would break the foundation's own release gate | Debug APKs as private Actions artifacts only; public pre-releases stay blocked |
+| 5 | Debug APK vs name gate | A public pre-release would break the foundation's own release gate | Debug APKs as short-lived manual artifacts only (publicly downloadable while the repo is public); public pre-releases stay blocked |
 | 6 | Error handling | One retry policy for all failures wastes time on dead tracks and skips healthy ones offline | Classified errors, backoff, offline wait-and-resume |
 | 7 | Limits and persistence | Unbounded radio, per-change queue rewrites, loudness boost clipping, history lost on kill | 500-item cap with batch 25, structure saved on change and position every 15 s, attenuate-only loudness, history at the 30 s mark |
 
