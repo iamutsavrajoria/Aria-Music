@@ -13,10 +13,12 @@ import app.aria.domain.QueueStore
 import app.aria.domain.RadioSource
 import app.aria.domain.SearchSource
 import app.aria.domain.StreamSource
-import app.aria.domain.Track
+import app.aria.innertube.adapter.YouTubeRadioSource
 import app.aria.innertube.adapter.YouTubeSearchSource
 import app.aria.innertube.adapter.YouTubeStreamSource
 import app.aria.innertube.extraction.ExtractorSession
+import app.aria.innertube.extraction.PoTokenSource
+import app.aria.innertube.potoken.WebViewPoTokenSource
 import app.aria.music.ConnectivityNetworkMonitor
 import app.aria.playback.DefaultPlaybackEngine
 import dagger.Module
@@ -36,15 +38,13 @@ object AppModule {
 
     @Provides @Singleton fun playEvents(db: AriaDatabase): PlayEventRepository = PlayEventRepositoryImpl(db.playEventDao())
     @Provides @Singleton fun search(): SearchSource = YouTubeSearchSource()
-    @Provides @Singleton fun streams(): StreamSource =
-        YouTubeStreamSource.create(ExtractorSession.createDefault(poTokens = null)) // temporary; Task 12 replaces
     @Provides @Singleton fun network(@ApplicationContext c: Context): NetworkMonitor = ConnectivityNetworkMonitor(c)
     @Provides @Singleton fun queueStore(db: AriaDatabase): QueueStore = QueueStoreImpl(db.queueDao())
 
-    /** Stand-in until Task 12 binds YouTubeRadioSource. */
-    @Provides @Singleton fun radio(): RadioSource = object : RadioSource {
-        override suspend fun related(seed: Track, limit: Int): Result<List<Track>> = Result.success(emptyList())
-    }
+    @Provides @Singleton fun radio(): RadioSource = YouTubeRadioSource()
+    @Provides @Singleton fun poTokens(@ApplicationContext c: Context): PoTokenSource = WebViewPoTokenSource(c)
+    @Provides @Singleton fun extractorSession(p: PoTokenSource): ExtractorSession = ExtractorSession.createDefault(p)
+    @Provides @Singleton fun streams(s: ExtractorSession): StreamSource = YouTubeStreamSource.create(s)
 
     @Provides @Singleton
     fun engine(
