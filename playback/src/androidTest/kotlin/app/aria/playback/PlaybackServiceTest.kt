@@ -15,6 +15,7 @@ import app.aria.domain.PlaybackStatus
 import app.aria.domain.Track
 import app.aria.domain.TrackId
 import org.junit.After
+import kotlinx.coroutines.launch
 import org.junit.Assert
 import org.junit.Before
 import org.junit.Rule
@@ -35,11 +36,14 @@ class PlaybackServiceTest {
     private fun waitUntil(timeoutMs: Long = 20_000, cond: () -> Boolean) {
         val end = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < end) { if (cond()) return; Thread.sleep(100) }
-        Assert.fail("condition not met within $timeoutMs ms; state=${engine.state.value}")
+        Assert.fail("condition not met within $timeoutMs ms; state=${engine.state.value}; events=${seen.toList()}")
     }
 
-    @Before fun start() { onMain { AriaPlaybackService.start(ctx); engine.setEndlessRadio(false); engine.playNow(listOf(track(1), track(2))) } }
-    @After fun stop() { onMain { engine.clear() }; ctx.stopService(Intent(ctx, AriaPlaybackService::class.java)) }
+    private val seen = java.util.concurrent.CopyOnWriteArrayList<Any>()
+    private val collector = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main.immediate)
+
+    @Before fun start() { onMain { collector.launch { engine.events.collect { seen.add(it) } }; AriaPlaybackService.start(ctx); engine.setEndlessRadio(false); engine.playNow(listOf(track(1), track(2))) } }
+    @After fun stop() { onMain { collector.cancel(); engine.clear() }; ctx.stopService(Intent(ctx, AriaPlaybackService::class.java)) }
 
     @Test fun positionAdvancesAndNotificationIsPosted() {
         waitUntil { engine.state.value.status == PlaybackStatus.Playing && engine.state.value.positionMs > 1_000 }
