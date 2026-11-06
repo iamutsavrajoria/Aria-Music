@@ -20,6 +20,7 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "0.1.0"
+        testInstrumentationRunner = "app.aria.music.HiltTestRunner"
         resValue("string", "app_name", brand.getProperty("app.name"))
         buildConfigField("String", "BRAND_NAME", "\"${brand.getProperty("app.name")}\"")
     }
@@ -64,6 +65,10 @@ dependencies {
     implementation(project(":playback"))
     implementation(libs.hilt)
     ksp(libs.hilt.compiler)
+    androidTestImplementation(libs.hilt.testing)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    kspAndroidTest(libs.hilt.compiler)
     implementation(libs.activity)
     implementation(libs.compose.runtime)
     implementation(libs.compose.foundation)
