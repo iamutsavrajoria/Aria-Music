@@ -3,7 +3,7 @@
 
 Aria has no telemetry, analytics, advertising or crash-reporting service. Nothing is sent to the Aria project.
 
-When you search or play music, the app contacts YouTube Music to do it. That request contains your search text or the video ID, and the identifiers the YouTube client library normally sends. Google receives these. See [docs/data-flow.md](docs/data-flow.md) for the full list, which is derived from the provider records in [docs/providers/](docs/providers/).
+When you search or play music, the app contacts YouTube Music to do it. That request contains your search text or the video ID, and the identifiers the YouTube client library normally sends. Google receives these. To play some streams the app also asks Google (`www.youtube.com`) for a BotGuard attestation token, which sends your YouTube visitor data and a challenge request; the token is computed on your device in a hidden, locked-down web view and no Aria server is involved. See [docs/data-flow.md](docs/data-flow.md) for the full list, which is derived from the provider records in [docs/providers/](docs/providers/).
 
 If the app crashes it writes a report to a file on your device, and nothing is sent anywhere. The in-app viewer for that report is not built yet, so for now the file is not shown in the app. Tokens, cookies, authorization headers and the query string of every URL are removed before the report is written.
 

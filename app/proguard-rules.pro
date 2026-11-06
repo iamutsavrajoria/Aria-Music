@@ -4,3 +4,5 @@
 -dontwarn java.lang.management.**
 -dontwarn org.slf4j.**
 -dontwarn org.slf4j.impl.**
+# The PoToken WebView's single JavaScript bridge method is reached by name from page JavaScript (ADR-0002).
+-keepclassmembers class app.aria.innertube.potoken.PoTokenWebView$Bridge { @android.webkit.JavascriptInterface <methods>; }
