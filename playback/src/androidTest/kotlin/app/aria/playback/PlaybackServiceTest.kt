@@ -15,6 +15,7 @@ import app.aria.domain.PlaybackStatus
 import app.aria.domain.Track
 import app.aria.domain.TrackId
 import org.junit.After
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import org.junit.Assert
 import org.junit.Before
