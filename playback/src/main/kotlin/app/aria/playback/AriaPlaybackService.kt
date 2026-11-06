@@ -19,9 +19,13 @@ class AriaPlaybackService : MediaSessionService() {
         val provider = application as PlaybackEngineProvider
         engine = provider.playbackEngine
         val out = Media3PlayerOutput(this, engine, provider.allowLocalStreams).also { output = it }
-        session = MediaSession.Builder(this, EngineForwardingPlayer(out.exo, engine))
+        val built = MediaSession.Builder(this, EngineForwardingPlayer(out.exo, engine))
             .setCallback(TrustedCallback(packageName))
             .build()
+        session = built
+        // The UI drives the engine directly and never connects a MediaController, so register the session here:
+        // without it Media3 posts no media notification until some controller connects.
+        addSession(built)
         engine.attach(out)
     }
 
