@@ -34,10 +34,10 @@ class PlaybackServiceTest {
     private fun track(n: Int) = Track(TrackId.youtube("track%06d".format(n)), "T$n", listOf("A"), 6_000L, null)
     private fun onMain(block: () -> Unit) = inst.runOnMainSync(block)
 
-    private fun waitUntil(timeoutMs: Long = 20_000, cond: () -> Boolean) {
+    private fun waitUntil(timeoutMs: Long = 20_000, diagnostics: () -> String = { "" }, cond: () -> Boolean) {
         val end = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < end) { if (cond()) return; Thread.sleep(100) }
-        Assert.fail("condition not met within $timeoutMs ms; state=${engine.state.value}; events=${seen.toList()}")
+        Assert.fail("condition not met within $timeoutMs ms; state=${engine.state.value}; events=${seen.toList()}; ${diagnostics()}")
     }
 
     private val seen = java.util.concurrent.CopyOnWriteArrayList<Any>()
@@ -48,9 +48,10 @@ class PlaybackServiceTest {
 
     @Test fun positionAdvancesAndNotificationIsPosted() {
         waitUntil { engine.state.value.status == PlaybackStatus.Playing && engine.state.value.positionMs > 1_000 }
-        waitUntil {
-            ctx.getSystemService(NotificationManager::class.java).activeNotifications.any { it.packageName == ctx.packageName }
-        }
+        val nm = ctx.getSystemService(NotificationManager::class.java)
+        waitUntil(diagnostics = {
+            "enabled=${nm.areNotificationsEnabled()} channels=${nm.notificationChannels.map { it.id }} active=${nm.activeNotifications.map { it.packageName + ':' + it.id }}"
+        }) { nm.activeNotifications.any { it.packageName == ctx.packageName } }
     }
 
     @Test fun sessionControlsReachTheEngine() {
