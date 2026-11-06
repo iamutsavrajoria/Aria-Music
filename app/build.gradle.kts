@@ -75,6 +75,7 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.material3)
     implementation(libs.coroutines.core)
+    implementation(libs.coroutines.android)
     implementation(libs.room.runtime)
     implementation(libs.timber)
 }
