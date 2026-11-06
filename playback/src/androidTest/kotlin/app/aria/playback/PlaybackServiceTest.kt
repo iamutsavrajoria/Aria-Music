@@ -26,7 +26,9 @@ import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class PlaybackServiceTest {
-    @get:Rule val permission: GrantPermissionRule = GrantPermissionRule.grant(Manifest.permission.POST_NOTIFICATIONS)
+    // POST_NOTIFICATIONS exists only from API 33; granting it on older images fails the rule.
+    @get:Rule val permission: GrantPermissionRule =
+        if (android.os.Build.VERSION.SDK_INT >= 33) GrantPermissionRule.grant(Manifest.permission.POST_NOTIFICATIONS) else GrantPermissionRule.grant()
 
     private val inst = InstrumentationRegistry.getInstrumentation()
     private val ctx: Context = inst.targetContext
