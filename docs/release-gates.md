@@ -9,6 +9,7 @@ Unchecked boxes are open. Source: the foundation and playback-core design specs 
 - [ ] Repo on an account with 2FA; Codeberg mirror configured; APK signing key backed up offline. (The repo is public at https://github.com/iamutsavrajoria/Aria-Music.)
 - [ ] Non-affiliation notice present in README and the About screen. README has it; there is no About screen yet.
 - [ ] Any APK (even a debug build) shared outside the maintainer is a public build: make the repo private first or clear every gate above. Debug-APK artifacts on this public repo are downloadable by anyone signed in to GitHub.
+- [ ] Kill switch operable before any public build that contains the unofficial YouTube paths (playback-core spec section 7 item 2). Today it is not: `killSwitches.youtube` exists only in the registry schema and verifier in `:core`; the app fetches no registry and reads no switch (see [providers/youtube-music.md](providers/youtube-music.md)). Closes when the app fetches the signed registry and playback and search honor `killSwitches.youtube`, with a test.
 - [ ] Cipher config: generate production Ed25519 key(s), host the signed config at an Aria-controlled URL, embed the public key(s), then enable `CipherConfigUpdater` (disabled in the alpha; extractor hot-fixes between app releases need this). InnerTubeX v0.5.2 ignores injected cipher configs; signed config is staged until a later release.
 
 ## Before the first beta
