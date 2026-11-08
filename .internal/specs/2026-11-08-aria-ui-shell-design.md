@@ -64,3 +64,32 @@ All new tests green in CI including API 26 and 34 jobs; manual device checklist 
 
 ## 8. Open items (not blocking)
 Final name, trademark check, package ID; `verification-metadata.xml`; Dependabot PRs #1 and #3; PoToken real-device confirmation.
+
+## Stress Test Results: UI shell
+
+Date: 2026-11-08. Nine branches interrogated (eight mapped up front, one added by the one-time self-review). All nine recommendations were accepted.
+
+### Resolved Decisions
+1. **Parser fixtures:** this sandbox cannot reach YouTube Music, so hand-written fixtures test mapping logic and null-safety only. A maintainer-run `scripts/capture-innertube-fixtures` saves real sanitised responses into `innertube/src/test/resources`; a stale-fixture CI test fails loudly. "Parsers verified against live responses" becomes a release gate in `docs/release-gates.md` and the manual checklist. Phase A is mostly adapters over the already-ported `YouTube.home/album/artist/playlist/search/library`, not new network code.
+2. **Library definition:** Library Songs = songs with `inLibrary != null`. Like sets `inLibrary`; "Add to library" sets it without a like; plain plays stay in history only. Songs are upserted on first like, add, playlist-add or play. Albums and artists follow the same rule. No YouTube account sync now; `libraryAddToken`/`libraryRemoveToken` stay unused and are documented as reserved.
+3. **Home cache:** parsed domain models in a small Room table keyed by shelf type with a fetched-at time; stale-while-revalidate; marked "may be outdated" after 7 days; undecodable rows are dropped and refetched. Nothing else (search, detail pages) is cached in this sub-project. Local-history sections work fully offline.
+4. **PlayerController:** Hilt singleton; slow `PlayerUiState` (`distinctUntilChanged`) separate from a `positionMs` flow only the seek bar and mini-player progress collect; engine events become one-shot messages via a controller-owned channel; a test proves a command sent with no running service starts the service and sets the queue.
+5. **Settings:** `SettingsRepository` interface in `:domain`, Preferences DataStore implementation in `:data`. The Application (not a screen) applies stored values to the engine at startup. `historyThresholdMs` becomes an engine setting clamped to 10–120 s, with tests, including one that a stored value reaches the engine with no Settings screen created. DataStore's version is verified against Maven before use.
+6. **Images (security):** Coil 3 with its network module (names and versions verified first). An interceptor rejects URLs failing `StreamUrlPolicy` or an image-host allowlist (configured in one place, tested). Disk cache capped at 100 MB and excluded from backup; decoded size capped. `docs/data-flow.md` documents that image requests reveal the IP to Google's image CDN.
+7. **Delivery order:** five vertical slices, each CI-green and usable: (1) data layer and `PlayerController`; (2) shell, mini player, Now Playing (Material skin), Queue and Search; (3) Home, Library and detail pages; (4) Settings and onboarding; (5) Apple-style skin. Fixed cut order: Apple skin, then Home shelf variety (keep Quick picks and Recently played), then playlist reordering, then onboarding polish. Security and accessibility items are never cut. UI tests land with each slice.
+8. **Strings:** every user-visible string, including content descriptions, lives in `strings.xml` from the first screen; a CI script (like `check-webview-safety.sh`) fails on string literals passed to `Text(`, `contentDescription =` and similar in `app/src/main`; plurals and locale-aware formatting; English only, with a pseudolocale (`en-XA`) layout check.
+9. **Scale (added by reflexion):** Library lists are Room `Flow` queries with sort and filter in SQL, slim projection classes, stable `LazyColumn` keys, no Paging library for now. Playing from a list longer than the engine's 500-item cap queues a 500-item window starting at the tapped item and tells the user. Playlist reorder is a transactional position rewrite with a test.
+
+### Changes Made
+- Decisions above are binding on the plan; sections 3, 4, 5 and 6 of this spec are amended by reference rather than rewritten.
+- New dependencies to verify before planning: `androidx.datastore:datastore-preferences`, Coil 3 and its network module.
+
+### Deferred / Parking Lot
+- YouTube account login and library sync (uses the reserved token columns).
+- Paging 3 if real libraries show list-query slowness.
+- Caching search results and detail pages for offline.
+- Translations (Crowdin) beyond English.
+
+### Confidence Assessment
+- Overall: Medium-High.
+- Areas of concern: live YouTube Music response shapes cannot be verified in the sandbox (gate, decision 1); size of the sub-project (cut order, decision 7); new dependencies compiled only in CI.
