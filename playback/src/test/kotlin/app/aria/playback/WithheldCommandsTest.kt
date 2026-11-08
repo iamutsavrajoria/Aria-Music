@@ -2,10 +2,13 @@
 package app.aria.playback
 
 import androidx.media3.common.Player
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
+@RunWith(RobolectricTestRunner::class)
 class WithheldCommandsTest {
     private val withheld = listOf(
         Player.COMMAND_CHANGE_MEDIA_ITEMS, Player.COMMAND_SET_MEDIA_ITEM,
