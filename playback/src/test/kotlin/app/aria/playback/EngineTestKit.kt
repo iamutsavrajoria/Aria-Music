@@ -20,6 +20,8 @@ class FakeOutput : PlayerOutput {
     @JvmField var repeatOne = false
     @JvmField var skipSilence = false
     val retries = mutableListOf<Long>(); val calls = mutableListOf<String>()
+    /** Lets a test play the real player, which can report an end of playback while the engine is still editing it. */
+    var onRemove: (() -> Unit)? = null; var onClear: (() -> Unit)? = null
     override fun setPlaylist(items: List<QueueItem>, startIndex: Int, startPositionMs: Long, playWhenReady: Boolean) {
         playlist = items; index = startIndex; position = startPositionMs; this.playWhenReady = playWhenReady; calls += "setPlaylist"
     }
@@ -31,7 +33,7 @@ class FakeOutput : PlayerOutput {
     override fun remove(index: Int) {
         playlist = playlist.toMutableList().apply { removeAt(index) }
         if (index < this.index) this.index--
-        calls += "remove@$index"
+        calls += "remove@$index"; onRemove?.invoke()
     }
     override fun move(from: Int, to: Int) {
         playlist = playlist.toMutableList().apply { add(to, removeAt(from)) }
@@ -39,7 +41,7 @@ class FakeOutput : PlayerOutput {
         calls += "move"
     }
     override fun reorder(items: List<QueueItem>, currentIndex: Int) { playlist = items; index = currentIndex; calls += "reorder" }
-    override fun clear() { playlist = emptyList(); index = -1; calls += "clear" }
+    override fun clear() { playlist = emptyList(); index = -1; calls += "clear"; onClear?.invoke() }
     override fun seekTo(index: Int, positionMs: Long) { this.index = index; position = positionMs; calls += "seekTo@$index" }
     override fun setPlayWhenReady(play: Boolean) { playWhenReady = play }
     override fun retry(positionMs: Long) { retries += positionMs }

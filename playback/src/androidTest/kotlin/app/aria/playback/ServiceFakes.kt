@@ -10,6 +10,7 @@ import app.aria.domain.ResolvedStream
 import app.aria.domain.SavedPosition
 import app.aria.domain.SavedQueue
 import app.aria.domain.StreamSource
+import app.aria.domain.StreamUnavailableException
 import app.aria.domain.Track
 import app.aria.domain.TrackId
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,10 +18,10 @@ import kotlinx.coroutines.flow.StateFlow
 
 // androidTest cannot see src/test, so these are small local copies of the EngineTestKit fakes.
 
-/** Every track resolves to the same local URL. */
-class ServiceStreams(private val url: String) : StreamSource {
+/** Every track resolves to the same local URL, except [unavailable] ones, which fail permanently. */
+class ServiceStreams(private val url: String, private val unavailable: Set<TrackId> = emptySet()) : StreamSource {
     override suspend fun resolve(id: TrackId): Result<ResolvedStream> =
-        Result.success(ResolvedStream(url, "audio/wav", 64_000, null, null))
+        if (id in unavailable) Result.failure(StreamUnavailableException("test: permanently unavailable")) else Result.success(ResolvedStream(url, "audio/wav", 64_000, null, null))
 }
 
 class NoopStore : QueueStore {

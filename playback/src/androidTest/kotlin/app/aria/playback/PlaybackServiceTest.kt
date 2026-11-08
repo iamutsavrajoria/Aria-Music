@@ -6,11 +6,13 @@ import android.app.NotificationManager
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
+import app.aria.domain.PlaybackEvent
 import app.aria.domain.PlaybackStatus
 import app.aria.domain.Track
 import app.aria.domain.TrackId
@@ -65,5 +67,33 @@ class PlaybackServiceTest {
         onMain { controller.seekToNext() }
         waitUntil { engine.state.value.currentIndex == 1 }
         onMain { controller.release() }
+    }
+
+    /** After a PlaybackException ExoPlayer is idle; the skip must prepare it again or the next track never starts. */
+    @Test fun permanentFailureSkipsToTheNextTrackAndPlaysIt() {
+        onMain { engine.playNow(listOf(Track(TestAriaApp.UNAVAILABLE, "Gone", listOf("A"), 6_000L, null), track(2))) }
+        waitUntil { engine.state.value.currentIndex == 1 }
+        waitUntil { engine.state.value.status == PlaybackStatus.Playing && engine.state.value.positionMs > 500 }
+        Assert.assertTrue("expected a Skipped event; events=${seen.toList()}", seen.any { it is PlaybackEvent.Skipped })
+        Assert.assertEquals("T2", engine.state.value.current?.track?.title)
+    }
+
+    /** Queue edits, modes and stop would bypass the engine (and StreamUrlPolicy), so a controller must not be offered them. */
+    @Test fun controllerIsNotOfferedCommandsThatBypassTheEngine() {
+        waitUntil { engine.state.value.status == PlaybackStatus.Playing }
+        val token = SessionToken(ctx, ComponentName(ctx, AriaPlaybackService::class.java))
+        val controller = MediaController.Builder(ctx, token).buildAsync().get(15, TimeUnit.SECONDS)
+        var transport = false
+        val withheld = mutableListOf<Int>()
+        onMain {
+            transport = controller.isCommandAvailable(Player.COMMAND_PLAY_PAUSE)
+            listOf(
+                Player.COMMAND_CHANGE_MEDIA_ITEMS, Player.COMMAND_SET_MEDIA_ITEM,
+                Player.COMMAND_SET_REPEAT_MODE, Player.COMMAND_SET_SHUFFLE_MODE, Player.COMMAND_STOP,
+            ).filterTo(withheld) { controller.isCommandAvailable(it) }
+        }
+        onMain { controller.release() }
+        Assert.assertTrue("transport must stay available", transport)
+        Assert.assertEquals("commands still offered: $withheld", emptyList<Int>(), withheld)
     }
 }

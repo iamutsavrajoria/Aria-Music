@@ -17,4 +17,8 @@ class StreamUrlPolicyTest {
         assertTrue(StreamUrlPolicy.isAllowed("file:///data/user/0/x/cache/silence.wav", allowLocal = true))
         assertFalse(StreamUrlPolicy.isAllowed("content://x/y", allowLocal = true))
     }
+    @Test fun foreignSchemesNeverPassEvenWhenLocalIsAllowed() {
+        listOf("aria://track/x", "ARIA://track/x", "ftp://a.example/x", "android.resource://app/1", "content://x/y", "asset:///x", "http://a.example/x")
+            .forEach { assertFalse(StreamUrlPolicy.isAllowed(it, allowLocal = true), it) }
+    }
 }
