@@ -51,7 +51,11 @@ class Media3PlayerOutput(
 
     /** Runs on ExoPlayer's loader thread, never on the main thread. */
     private fun resolve(spec: DataSpec): DataSpec {
-        if (spec.uri.scheme != SCHEME) return spec
+        if (spec.uri.scheme != SCHEME) {
+            // Only aria:// items are ours to resolve; a foreign URI must never reach DefaultDataSource unchecked.
+            if (StreamUrlPolicy.isAllowed(spec.uri.toString(), allowLocalStreams)) return spec
+            throw PermanentStreamException(IllegalStateException("unsupported URI scheme"))
+        }
         val raw = spec.uri.lastPathSegment ?: throw IOException("Bad track URI")
         val id = try { TrackId.parse(raw) } catch (e: IllegalArgumentException) { throw PermanentStreamException(e) }
         val stream = try {
@@ -71,7 +75,7 @@ class Media3PlayerOutput(
         .setMediaMetadata(
             MediaMetadata.Builder()
                 .setTitle(q.track.title).setArtist(q.track.artists.joinToString())
-                .setArtworkUri(q.track.thumbnailUrl?.let { Uri.parse(it) })
+                .setArtworkUri(q.track.thumbnailUrl?.takeIf { StreamUrlPolicy.isAllowed(it, false) }?.let { Uri.parse(it) })
                 .setIsPlayable(true).setIsBrowsable(false)
                 .build(),
         ).build()
@@ -93,8 +97,10 @@ class Media3PlayerOutput(
         exo.addMediaItems(exo.mediaItemCount, items.subList(currentIndex + 1, items.size).map(::item))
     }
     override fun clear() { exo.clearMediaItems() }
-    override fun seekTo(index: Int, positionMs: Long) { exo.seekTo(index, positionMs) }
-    override fun setPlayWhenReady(play: Boolean) { exo.playWhenReady = play }
+    override fun seekTo(index: Int, positionMs: Long) { exo.seekTo(index, positionMs); prepareIfIdle() }
+    override fun setPlayWhenReady(play: Boolean) { exo.playWhenReady = play; if (play) prepareIfIdle() }
+    /** After a PlaybackException the player is STATE_IDLE and ignores seeks and play until prepare() is called again. */
+    private fun prepareIfIdle() { if (exo.playbackState == Player.STATE_IDLE && exo.mediaItemCount > 0) exo.prepare() }
     override fun retry(positionMs: Long) { exo.seekTo(exo.currentMediaItemIndex, positionMs); exo.prepare() }
     override fun setRepeatOne(on: Boolean) { exo.repeatMode = if (on) Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF }
     override fun setSkipSilence(on: Boolean) { exo.skipSilenceEnabled = on }

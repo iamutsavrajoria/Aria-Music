@@ -29,6 +29,14 @@ class DefaultPlaybackEngine(
     internal val model = QueueModel(random)
     private var output: PlayerOutput? = null
 
+    /**
+     * Starts the playback service. Invoked when a command that needs playback arrives while no output is attached
+     * (after a restore or an idle stop); the app sets it, so :playback stays free of DI. Starting twice is harmless.
+     */
+    var serviceStarter: (() -> Unit)? = null
+    /** True while the engine edits the output's playlist itself, so the player's echoes of those edits are ignored. */
+    private var editingOutput = false
+
     private var repeatMode = RepeatMode.OFF
     private var wantPlay = false
     private var buffering = false
@@ -70,6 +78,13 @@ class DefaultPlaybackEngine(
         // Single writers per channel: saves are serialized and the latest value wins.
         scope.launch { for (s in structureSaves) runCatching { store.saveStructure(s) } }
         scope.launch { for (p in positionSaves) runCatching { store.savePosition(p) } }
+    }
+
+    private fun ensureService() { if (output == null) runCatching { serviceStarter?.invoke() } }
+
+    private inline fun editOutput(block: () -> Unit) {
+        editingOutput = true
+        try { block() } finally { editingOutput = false }
     }
 
     private fun status(): PlaybackStatus = when {
@@ -168,7 +183,12 @@ class DefaultPlaybackEngine(
     // ---- queue commands -------------------------------------------------------------------------------
     override fun playNow(tracks: List<Track>, startIndex: Int) {
         if (tracks.isEmpty()) return
-        model.replace(tracks, startIndex)
+        ensureService()
+        // Cap at QUEUE_CAP: keep the tapped item and the ones after it, dropping earlier ones only as far as needed.
+        val tapped = startIndex.coerceIn(0, tracks.lastIndex)
+        val first = minOf(tapped, tracks.size - QUEUE_CAP).coerceAtLeast(0)
+        val capped = if (tracks.size > QUEUE_CAP) tracks.subList(first, first + QUEUE_CAP) else tracks
+        model.replace(capped, tapped - first)
         errorMsg = null; wantPlay = true; buffering = true
         output?.setPlaylist(model.items, model.index, 0L, true)
         updateTicker(); onCurrentChanged(); onStructureChanged()
@@ -183,15 +203,17 @@ class DefaultPlaybackEngine(
     override fun addToEnd(tracks: List<Track>) {
         if (tracks.isEmpty()) return
         if (model.items.isEmpty()) return playNow(tracks)
+        val room = QUEUE_CAP - model.items.size
+        if (room <= 0) return
         val start = model.items.size
-        model.append(tracks)
+        model.append(tracks.take(room))
         output?.insert(start, model.items.subList(start, model.items.size)); onStructureChanged()
     }
 
     override fun removeAt(index: Int) {
         if (index !in model.items.indices) return
         val wasCurrent = index == model.index
-        model.removeAt(index); output?.remove(index)
+        model.removeAt(index); editOutput { output?.remove(index) }
         if (model.items.isEmpty()) { wantPlay = false; buffering = false; updateTicker(); onCurrentChanged() }
         else if (wasCurrent) goTo(model.index, wantPlay)
         onStructureChanged()
@@ -203,11 +225,14 @@ class DefaultPlaybackEngine(
     }
 
     override fun clear() {
-        model.clear(); output?.clear(); wantPlay = false; buffering = false; errorMsg = null
+        model.clear(); editOutput { output?.clear() }; wantPlay = false; buffering = false; errorMsg = null
         updateTicker(); onCurrentChanged(); onStructureChanged()
     }
 
-    override fun skipTo(index: Int) { if (index in model.items.indices) goTo(index, true) }
+    override fun skipTo(index: Int) {
+        if (index !in model.items.indices) return
+        ensureService(); goTo(index, true)
+    }
 
     private fun goTo(index: Int, play: Boolean) {
         model.jumpTo(index)
@@ -219,6 +244,7 @@ class DefaultPlaybackEngine(
     // ---- transport ------------------------------------------------------------------------------------
     override fun play() {
         if (model.items.isEmpty()) return
+        ensureService()
         if (errorMsg != null) { consecutiveFailures = 0; goTo(model.index, true); return }
         wantPlay = true; output?.setPlayWhenReady(true); updateTicker(); publish()
     }
@@ -237,12 +263,15 @@ class DefaultPlaybackEngine(
     }
 
     override fun next() {
+        if (model.items.isEmpty()) return
+        ensureService()
         val target = nextIndexOrNull()
         if (target != null) goTo(target, true) else stopAtEnd()
     }
 
     override fun previous() {
         if (model.items.isEmpty()) return
+        ensureService()
         val played = output?.positionMs() ?: positionMs
         when {
             played > PREVIOUS_RESTART_MS -> seekTo(0L)
@@ -257,6 +286,7 @@ class DefaultPlaybackEngine(
     }
 
     private fun stopAtEnd() {
+        if (model.items.isEmpty()) return
         wantPlay = false; buffering = false; positionMs = 0L
         output?.setPlayWhenReady(false); output?.seekTo(model.index, 0L)
         updateTicker(); publish()
@@ -368,6 +398,7 @@ class DefaultPlaybackEngine(
     }
 
     override fun onEnded() {
+        if (editingOutput) return
         sleepEndOfTrack = false; sleepTimer = null
         if (repeatMode == RepeatMode.ALL && model.items.isNotEmpty()) goTo(0, true) else stopAtEnd()
     }

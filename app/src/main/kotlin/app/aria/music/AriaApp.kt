@@ -4,6 +4,7 @@ package app.aria.music
 import android.app.Application
 import android.os.Build
 import app.aria.core.crash.CrashReportFormatter
+import app.aria.playback.AriaPlaybackService
 import app.aria.playback.DefaultPlaybackEngine
 import app.aria.playback.PlaybackEngineProvider
 import dagger.hilt.android.HiltAndroidApp
@@ -30,6 +31,8 @@ class AriaApp : Application(), PlaybackEngineProvider {
             }
             previous?.uncaughtException(thread, error)
         }
+        // Transport commands after a restore or an idle stop find no service; this starts it (the UI's own start is harmless alongside).
+        engine.serviceStarter = { AriaPlaybackService.start(this) }
         MainScope().launch { engine.restore() }
     }
 }
