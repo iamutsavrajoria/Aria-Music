@@ -37,5 +37,6 @@ internal object WithheldCommands {
         Player.COMMAND_SET_REPEAT_MODE, Player.COMMAND_SET_SHUFFLE_MODE, Player.COMMAND_STOP,
     )
 
+    @androidx.annotation.OptIn(UnstableApi::class)
     fun restrict(commands: Player.Commands): Player.Commands = commands.buildUpon().removeAll(*ALL).build()
 }
