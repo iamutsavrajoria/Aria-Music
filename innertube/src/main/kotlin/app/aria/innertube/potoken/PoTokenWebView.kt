@@ -136,11 +136,11 @@ class PoTokenWebView private constructor(
         webView.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(m: ConsoleMessage): Boolean {
                 val msg = m.message()
-                // Log all console messages for debugging
+                // Console bodies can echo tokens or request values, so only a fixed tag and level are logged.
                 when (m.messageLevel()) {
-                    ConsoleMessage.MessageLevel.ERROR -> Timber.tag(TAG).e("JS: $msg")
-                    ConsoleMessage.MessageLevel.WARNING -> Timber.tag(TAG).w("JS: $msg")
-                    else -> Timber.tag(TAG).d("JS: $msg")
+                    ConsoleMessage.MessageLevel.ERROR -> Timber.tag(TAG).e("JS console error")
+                    ConsoleMessage.MessageLevel.WARNING -> Timber.tag(TAG).w("JS console warning")
+                    else -> Timber.tag(TAG).d("JS console message")
                 }
 
                 if (msg.contains("Uncaught")) {

@@ -92,6 +92,8 @@ class PoTokenGenerator(
             // The streaming poToken needs to be generated exactly once before generating any other (player) tokens.
             val streamingPot = webView.generatePoToken(sessionId)
             val playerPot = webView.generatePoToken(videoId)
+            // The pairing (session token as playerRequestPoToken, video token as streamingDataPoToken) deliberately mirrors
+            // upstream Meld at fe9a666, including its field naming.
             val result = PoTokenResult(playerRequestPoToken = streamingPot, streamingDataPoToken = playerPot)
             cached = Cached(videoId, sessionId, result, webView.expiration)
             Timber.tag(TAG).d("PO token generated successfully")

@@ -96,8 +96,8 @@ class ExtractorSession(
         private const val TAG = "ExtractorSession"
 
         private val logger = InnerTubeLogger { event: InnerTubeLogEvent ->
-            val message = event.message + event.details.entries.joinToString(prefix = " [", postfix = "]") { "${it.key}=${it.value}" }
-                .takeUnless { event.details.isEmpty() }.orEmpty()
+            // event.details carries URLs and other request values, so only the message is forwarded.
+            val message = event.message
             when (event.level) {
                 InnerTubeLogLevel.DEBUG -> Timber.tag(event.tag).d(message)
                 InnerTubeLogLevel.INFO -> Timber.tag(event.tag).i(message)
