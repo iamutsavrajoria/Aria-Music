@@ -42,7 +42,7 @@ A usable YouTube-Music-only player: the screens on top of the playback core. Tog
 - One ViewModel per screen exposing one `StateFlow<UiState>`.
 - Every screen has loading, empty, error and offline states.
 - Glass only through `GlassSurface` with its API 26–30 fallback.
-- Playback errors surface as a non-blocking message with the reason (offline, unavailable, region); engine retry/skip behaviour is unchanged.
+- Playback errors surface as a non-blocking message with the reason (offline, unavailable; region-specific wording is deferred until the extractor reports it); engine retry/skip behaviour is unchanged.
 
 ## 4. Security, privacy, accessibility
 - Remote images load only over https via the existing `StreamUrlPolicy`; invalid artwork is dropped.
