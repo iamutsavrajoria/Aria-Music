@@ -4771,3 +4771,1638 @@ class SearchViewModel @Inject constructor(
 - [ ] **Step 4:** Push; `verify` (strings check passes with the empty baseline), `app-ui` and `playback-service` green. **Commit** `feat(app): search and removal of the legacy player screen`. **Slice 2 complete.**
 
 ---
+
+### Task 17: Home (Quick picks, YouTube Music shelves, Recently played, stale marker)
+
+Slice 3, decision 3 (UI part). Local sections always work offline; remote shelves are cached, revalidated on open and fail independently.
+
+**Files:**
+- Create: `app/src/main/kotlin/app/aria/music/ui/home/{HomeViewModel,HomeScreen}.kt`
+- Modify: `strings.xml`, `plurals.xml` (remove `home_placeholder`), `ui/shell/AriaNavHost.kt`
+- Test: `app/src/test/kotlin/app/aria/music/ui/home/HomeViewModelTest.kt`, `app/src/androidTest/kotlin/app/aria/music/ui/home/HomeTest.kt`
+
+**Interfaces:**
+- Consumes: `HomeRepository` (`quickPicks`, `recentlyPlayed`, `remote`, `needsRevalidation`, `refresh`), `ShelfState`, `Shelf`, `BrowseItem`, `PlayerController`, `NetworkMonitor`, `TrackRow`, shell states.
+- Produces:
+
+```kotlin
+sealed interface RemoteSection {
+    data object Loading : RemoteSection
+    data class Content(val shelves: List<ShelfState>, val outdated: Boolean, val refreshFailed: Boolean) : RemoteSection
+    data object Error : RemoteSection
+    data object Offline : RemoteSection
+}
+data class HomeUiState(val quickPicks: List<Track>, val recent: List<Track>, val remote: RemoteSection, val refreshing: Boolean)
+data class HomeActions(
+    val onPlay: (List<Track>, Int) -> Unit, val onOpenAlbum: (String) -> Unit, val onOpenArtist: (String) -> Unit, val onOpenPlaylist: (String) -> Unit,
+    val onRefresh: () -> Unit, val onOpenSettings: () -> Unit, val onTrackMenu: (Track, TrackMenuAction) -> Unit,
+)
+@HiltViewModel class HomeViewModel @Inject constructor(home: HomeRepository, library: LibraryRepository, controller: PlayerController, network: NetworkMonitor) : ViewModel() {
+    val state: StateFlow<HomeUiState>; fun refresh(); fun play(tracks: List<Track>, index: Int); fun playNext(t: Track); fun addToQueue(t: Track); fun like(t: Track)
+}
+@Composable fun HomeContent(state: HomeUiState, actions: HomeActions, modifier: Modifier = Modifier)
+@Composable fun HomeScreen(onAlbum: (String) -> Unit, onArtist: (String) -> Unit, onPlaylist: (String) -> Unit, onSettings: () -> Unit, viewModel: HomeViewModel = hiltViewModel())
+tags: TAG_HOME_STALE, TAG_HOME_SHELF_FAILED, "home:quick:<n>", "home:recent:<n>", TAG_HOME_LIST
+```
+
+**Acceptance Criteria:**
+- Cached remote shelves show immediately; the screen revalidates on open only when `needsRevalidation()` is true; pull to refresh always refreshes; offline never calls the network.
+- Remote section: `Loading` (no cache, refresh running), `Content` (cache or fresh; `outdated` shows the banner "Saved content, may be outdated" after 7 days; a failed shelf of a fresh response shows its own "This section could not load" placeholder with the shelf title while neighbours render; `refreshFailed` when a refresh failed but a cache is shown), `Error` (no cache, online, refresh failed, with Retry), `Offline` (no cache, offline).
+- Quick picks and Recently played are independent of the remote section (hidden behind a one-line hint when empty: "Play something and your quick picks appear here").
+- Tapping a song plays the section's songs from there; tiles open album, artist or playlist pages; the settings entry (48dp, described "Settings") navigates to `SettingsRoute`.
+
+- [ ] **Step 1: Failing tests.**
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.home
+
+import app.aria.domain.*
+import app.aria.domain.testing.*
+import app.aria.music.player.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.*
+import kotlin.test.*
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class HomeViewModelTest {
+    private val dispatcher = StandardTestDispatcher()
+    @BeforeTest fun setMain() = Dispatchers.setMain(dispatcher)
+    @AfterTest fun resetMain() = Dispatchers.resetMain()
+
+    private class Env(scope: kotlinx.coroutines.CoroutineScope, online: Boolean = true) {
+        val home = FakeHomeRepository(); val library = FakeLibraryRepository(); val engine = FakePlaybackEngine(); val network = FakeNetworkMonitor(online)
+        val vm by lazy { HomeViewModel(home, library, PlayerController(engine, ServiceLauncher { }, scope), network).also { scope.launch { it.state.collect { } } } }
+    }
+    private fun shelf(t: String) = Shelf(t, null, listOf(BrowseItem.Song(Samples.track(1))))
+
+    @Test fun cacheShowsImmediatelyAndRevalidatesOnlyWhenNeeded() = runTest(dispatcher) {
+        val e = Env(backgroundScope); e.home.remoteState.value = HomeRemote(listOf(shelf("A")), 1L, outdated = false); e.home.revalidate = false
+        e.vm; advanceUntilIdle()
+        val c = e.vm.state.value.remote as RemoteSection.Content
+        assertEquals(listOf(ShelfState.Ready(shelf("A"))), c.shelves); assertFalse(c.outdated); assertEquals(0, e.home.refreshCalls)
+    }
+
+    @Test fun staleCacheIsMarkedAndRevalidated() = runTest(dispatcher) {
+        val e = Env(backgroundScope); e.home.remoteState.value = HomeRemote(listOf(shelf("A")), 1L, outdated = true)
+        e.home.refreshResult = Result.failure(java.io.IOException())
+        e.vm; advanceUntilIdle()
+        val c = e.vm.state.value.remote as RemoteSection.Content
+        assertTrue(c.outdated); assertTrue(c.refreshFailed); assertEquals(1, e.home.refreshCalls)
+    }
+
+    @Test fun freshResponseShowsFailedShelvesInPlace() = runTest(dispatcher) {
+        val e = Env(backgroundScope)
+        e.home.refreshResult = Result.success(HomeRefresh(listOf(ShelfState.Ready(shelf("A")), ShelfState.Failed("B"))))
+        e.vm; advanceUntilIdle()
+        val c = e.vm.state.value.remote as RemoteSection.Content
+        assertEquals(listOf(ShelfState.Ready(shelf("A")), ShelfState.Failed("B")), c.shelves); assertFalse(c.refreshFailed)
+    }
+
+    @Test fun noCacheAndFailureIsErrorThenRetrySucceeds() = runTest(dispatcher) {
+        val e = Env(backgroundScope); e.home.refreshResult = Result.failure(java.io.IOException())
+        e.vm; advanceUntilIdle(); assertEquals(RemoteSection.Error, e.vm.state.value.remote)
+        e.home.refreshResult = Result.success(HomeRefresh(listOf(ShelfState.Ready(shelf("A"))))); e.vm.refresh(); advanceUntilIdle()
+        assertTrue(e.vm.state.value.remote is RemoteSection.Content)
+    }
+
+    @Test fun offlineWithoutCacheNeverCallsTheNetwork() = runTest(dispatcher) {
+        val e = Env(backgroundScope, online = false); e.vm; advanceUntilIdle()
+        assertEquals(RemoteSection.Offline, e.vm.state.value.remote); assertEquals(0, e.home.refreshCalls)
+    }
+
+    @Test fun localSectionsAreIndependentOfTheRemoteOne() = runTest(dispatcher) {
+        val e = Env(backgroundScope, online = false); e.home.quick.value = Samples.tracks(2); e.home.recent.value = Samples.tracks(1, from = 5)
+        e.vm; advanceUntilIdle()
+        assertEquals(2, e.vm.state.value.quickPicks.size); assertEquals(listOf(Samples.track(5)), e.vm.state.value.recent)
+    }
+
+    @Test fun playingUsesTheController() = runTest(dispatcher) {
+        val e = Env(backgroundScope); e.vm.play(Samples.tracks(3), 2); advanceUntilIdle()
+        assertEquals(listOf(Samples.tracks(3) to 2), e.engine.playNowCalls)
+    }
+}
+```
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.home
+
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createComposeRule
+import app.aria.domain.*
+import app.aria.domain.testing.Samples
+import app.aria.music.R
+import app.aria.music.ui.AriaTestTheme
+import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.Test
+
+class HomeTest {
+    @get:Rule val rule = createComposeRule()
+    private fun str(id: Int, vararg a: Any) = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.getString(id, *a)
+    private val log = mutableListOf<String>()
+    private val actions = HomeActions(
+        { l, i -> log += "play:${l.size}:$i" }, { log += "album:$it" }, { log += "artist:$it" }, { log += "playlist:$it" }, { log += "refresh" }, { log += "settings" }, { t, a -> log += "menu:${t.title}:$a" },
+    )
+    private val shelf = Shelf("Fresh picks", "For you", listOf(BrowseItem.Song(Samples.track(1)), BrowseItem.Album(Samples.album(2)), BrowseItem.Artist(Samples.artist(3)), BrowseItem.Playlist(Samples.playlist(4))))
+    private fun state(remote: RemoteSection, quick: List<Track> = Samples.tracks(2), recent: List<Track> = Samples.tracks(1, from = 9)) = HomeUiState(quick, recent, remote, refreshing = false)
+    private fun show(s: HomeUiState, pseudo: Boolean = false, fontScale: Float = 1f) { log.clear(); rule.setContent { AriaTestTheme(pseudo, fontScale) { HomeContent(s, actions) } } }
+
+    @Test fun localAndRemoteSectionsRenderAndNavigate() {
+        show(state(RemoteSection.Content(listOf(ShelfState.Ready(shelf)), outdated = false, refreshFailed = false)))
+        rule.onNodeWithText(str(R.string.home_quick_picks)).assertExists(); rule.onNodeWithText(str(R.string.home_recently_played)).assertExists(); rule.onNodeWithText("Fresh picks").assertExists()
+        rule.onNodeWithTag("home:quick:0").performClick(); rule.onNodeWithText("Album 2").performClick(); rule.onNodeWithText("Artist 3").performClick(); rule.onNodeWithText("Playlist 4").performClick()
+        assertEquals(listOf("play:2:0", "album:MPREb_2", "artist:UC3", "playlist:PL4"), log)
+    }
+
+    @Test fun staleBannerAndRefresh() {
+        show(state(RemoteSection.Content(listOf(ShelfState.Ready(shelf)), outdated = true, refreshFailed = false)))
+        rule.onNodeWithTag(TAG_HOME_STALE).assertIsDisplayed(); rule.onNodeWithText(str(R.string.home_refresh)).performClick(); assertEquals(listOf("refresh"), log)
+    }
+
+    @Test fun failedShelfShowsItsTitleAndNeighboursStay() {
+        show(state(RemoteSection.Content(listOf(ShelfState.Ready(shelf), ShelfState.Failed("Charts")), false, false)))
+        rule.onNodeWithTag(TAG_HOME_SHELF_FAILED).assertExists(); rule.onNodeWithText("Charts").assertExists(); rule.onNodeWithText("Fresh picks").assertExists()
+    }
+
+    @Test fun emptyLocalSectionsShowAHint() {
+        show(state(RemoteSection.Offline, quick = emptyList(), recent = emptyList())); rule.onNodeWithText(str(R.string.home_quick_picks_hint)).assertExists(); rule.onNodeWithTag("state:offline").assertIsDisplayed()
+    }
+
+    @Test fun errorAndLoadingSections() { show(state(RemoteSection.Error)); rule.onNodeWithTag("state:error").assertIsDisplayed() }
+    @Test fun loadingSection() { show(state(RemoteSection.Loading)); rule.onNodeWithTag("state:loading").assertExists() }
+    @Test fun settingsEntryIsReachable() { show(state(RemoteSection.Loading)); rule.onNodeWithContentDescription(str(R.string.home_settings)).assertWidthIsAtLeast(androidx.compose.ui.unit.dp(48)).performClick(); assertEquals(listOf("settings"), log) }
+    @Test fun survivesPseudolocaleAndBigFonts() { show(state(RemoteSection.Content(listOf(ShelfState.Ready(shelf)), true, true)), pseudo = true, fontScale = 2f); rule.onNodeWithTag(TAG_HOME_LIST).assertExists() }
+}
+```
+
+  (`androidx.compose.ui.unit.dp(48)` stands for `48.dp` with `import androidx.compose.ui.unit.dp`; type it that way.)
+- [ ] **Step 2:** Push; CI fails. Expected: FAIL.
+- [ ] **Step 3: Implement.** Strings: `home_quick_picks` "Quick picks", `home_recently_played` "Recently played", `home_quick_picks_hint` "Play something and your quick picks appear here", `home_recent_hint` "Songs you play appear here", `home_stale` "Saved content, may be outdated", `home_refresh` "Refresh", `home_refresh_failed` "Could not refresh. Showing saved content.", `home_section_failed` "This section could not load", `home_settings` "Settings". Remove `home_placeholder`. ViewModel:
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.home
+
+@HiltViewModel
+class HomeViewModel @Inject constructor(
+    private val home: HomeRepository, private val library: LibraryRepository, private val controller: PlayerController, private val network: NetworkMonitor,
+) : ViewModel() {
+    private sealed interface Refresh {
+        data object Idle : Refresh; data object Running : Refresh; data object Offline : Refresh; data object Failed : Refresh
+        data class Done(val shelves: List<ShelfState>) : Refresh
+    }
+    private val refresh = MutableStateFlow<Refresh>(Refresh.Idle)
+
+    init { viewModelScope.launch { if (home.needsRevalidation()) refresh() } }
+
+    fun refresh() {
+        if (refresh.value == Refresh.Running) return
+        viewModelScope.launch {
+            if (!network.online.value) { refresh.value = Refresh.Offline; return@launch }
+            refresh.value = Refresh.Running
+            refresh.value = home.refresh().fold({ Refresh.Done(it.shelves) }, { Refresh.Failed })
+        }
+    }
+
+    private val remoteSection: Flow<RemoteSection> = combine(home.remote(), refresh) { cache, r ->
+        val cached = cache?.shelves?.map { ShelfState.Ready(it) }
+        when {
+            r is Refresh.Done -> RemoteSection.Content(r.shelves, outdated = false, refreshFailed = false)
+            cached != null -> RemoteSection.Content(cached, cache.outdated, refreshFailed = r is Refresh.Failed)
+            r is Refresh.Offline -> RemoteSection.Offline
+            r is Refresh.Failed -> RemoteSection.Error
+            else -> RemoteSection.Loading
+        }
+    }
+
+    val state: StateFlow<HomeUiState> = combine(home.quickPicks(12), home.recentlyPlayed(12), remoteSection, refresh) { q, r, remote, ref ->
+        HomeUiState(q, r, remote, refreshing = ref == Refresh.Running)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState(emptyList(), emptyList(), RemoteSection.Loading, false))
+
+    fun play(tracks: List<Track>, index: Int) = controller.play(tracks, index)
+    fun playNext(t: Track) = controller.playNext(t)
+    fun addToQueue(t: Track) = controller.addToQueue(listOf(t))
+    fun like(t: Track) { viewModelScope.launch { library.setLiked(t, true) } }
+}
+```
+
+  `HomeScreen.kt`: `HomeContent` = `PullToRefreshBox(isRefreshing = state.refreshing, onRefresh = actions.onRefresh) { LazyColumn(Modifier.testTag(TAG_HOME_LIST)) { ... } }` with items: a header row (title `app_name` via `stringResource(R.string.app_name)` and the Settings `IconButton(Modifier.size(48.dp))` with `AriaIcons.MoreVert`, description `home_settings`); the Quick picks section (`SectionHeader(home_quick_picks)` then up to 12 `TrackRow`s tagged `home:quick:<n>` whose click is `onPlay(state.quickPicks, n)`, or the hint text when empty); the remote section (`Loading -> LoadingState` box of fixed height, `Error -> ErrorState(onRetry = actions.onRefresh)`, `Offline -> OfflineState(onRetry = actions.onRefresh)`, `Content -> if (outdated) stale banner `Row(Modifier.testTag(TAG_HOME_STALE)) { Text(home_stale); TextButton(onClick = actions.onRefresh) { Text(home_refresh) } }`, `if (refreshFailed) Text(home_refresh_failed)`, then per shelf: `Ready -> ShelfRow(shelf)`; `Failed -> Row(Modifier.testTag(TAG_HOME_SHELF_FAILED)) { Text(title ?: "" via a non-literal), Text(home_section_failed), TextButton(refresh) }` (the title comes from data, never a literal); the Recently played section like Quick picks tagged `home:recent:<n>`. `ShelfRow`: `Text(shelf.title, style = titleMedium)` + optional subtitle + `LazyRow { items(shelf.items, key = { it.key }) { Tile(it) } }`, where `Tile` is a 144dp wide `Column(Modifier.clickable(onClick = ...))` with `AriaImage` (square, rounded; artists circular) and a two-line title; tapping a `Song` calls `onPlay(shelfSongs, indexAmongSongs)`, `Album -> onOpenAlbum(album.id)`, `Artist -> onOpenArtist(artist.id)`, `Playlist -> onOpenPlaylist(playlist.id)`. `HomeScreen` maps `TrackMenuAction` to the ViewModel (`LIKE -> like`). `AriaNavHost`: `composable<HomeRoute> { HomeScreen(onAlbum = { nav.navigate(AlbumRoute(it)) }, onArtist = { nav.navigate(ArtistRoute(it)) }, onPlaylist = { nav.navigate(PlaylistRoute(it, local = false)) }, onSettings = { nav.navigate(SettingsRoute) }) }`, and a temporary `composable<SettingsRoute> { EmptyState(R.string.coming_soon) }` (replaced in Task 21).
+- [ ] **Step 4 (CUTTABLE: Home shelf variety, cut order 2):** in `ShelfRow`, when every item of a shelf is a `Song` and the shelf has at least 4, render it as a two-column-per-page grid: `LazyRow` of `Column`s each holding two `TrackRow`-style compact rows (artwork 48dp, title, artist) so song shelves read as lists and album shelves as tiles; add a `HomeTest` case that a songs-only shelf shows its songs. If cut, every shelf stays a tile carousel and nothing else changes (Quick picks and Recently played are kept).
+- [ ] **Step 5:** Push; green on `verify`, `app-ui`. **Commit** `feat(app): Home screen with cached shelves and local sections`.
+
+---
+
+### Task 18: Library (Songs, Albums, Artists, Playlists)
+
+Slice 3, decisions 2 and 9. SQL-side sort and filter come from `LibraryRepository`; the list is a lazy list with stable keys; playing from it never queues more than 500.
+
+**Files:**
+- Create: `app/src/main/kotlin/app/aria/music/ui/library/{LibraryViewModel,LibraryScreen}.kt`
+- Modify: `strings.xml`, `plurals.xml` (remove `library_placeholder`), `ui/shell/AriaNavHost.kt`
+- Test: `app/src/test/kotlin/app/aria/music/ui/library/LibraryViewModelTest.kt`, `app/src/androidTest/kotlin/app/aria/music/ui/library/LibraryTest.kt`
+
+**Interfaces:**
+- Consumes: `LibraryRepository`, `PlaylistRepository.playlists`, `PlayerController`, `LibrarySong`, `LibrarySort`, `AlbumRef`, `ArtistRef`, `PlaylistRef`, `TrackRow`.
+- Produces:
+
+```kotlin
+enum class LibraryTab { SONGS, ALBUMS, ARTISTS, PLAYLISTS }
+sealed interface LibraryContent {
+    data object Loading : LibraryContent
+    data object Empty : LibraryContent            // nothing in this tab at all
+    data object NoMatches : LibraryContent        // the filter matches nothing
+    data object Error : LibraryContent
+    data class Songs(val rows: List<LibrarySong>) : LibraryContent
+    data class Albums(val rows: List<AlbumRef>) : LibraryContent
+    data class Artists(val rows: List<ArtistRef>) : LibraryContent
+    data class Playlists(val rows: List<PlaylistRef>) : LibraryContent
+}
+data class LibraryUiState(val tab: LibraryTab, val query: String, val sort: LibrarySort, val content: LibraryContent)
+data class LibraryActions(
+    val onTab: (LibraryTab) -> Unit, val onQuery: (String) -> Unit, val onSort: (LibrarySort) -> Unit, val onPlaySong: (List<Track>, Int) -> Unit,
+    val onPlayAll: () -> Unit, val onShuffleAll: () -> Unit, val onTrackMenu: (Track, LibraryTrackAction) -> Unit,
+    val onOpenAlbum: (String) -> Unit, val onOpenArtist: (String) -> Unit, val onOpenPlaylist: (String) -> Unit,
+)
+enum class LibraryTrackAction { PLAY_NEXT, ADD_TO_QUEUE, UNLIKE, REMOVE_FROM_LIBRARY }
+@HiltViewModel class LibraryViewModel @Inject constructor(library: LibraryRepository, playlists: PlaylistRepository, controller: PlayerController) : ViewModel() {
+    val state: StateFlow<LibraryUiState>; fun setTab(t: LibraryTab); fun setQuery(q: String); fun setSort(s: LibrarySort)
+    fun play(tracks: List<Track>, index: Int); fun playAll(); fun shuffleAll(); fun trackAction(t: Track, a: LibraryTrackAction)
+}
+@Composable fun LibraryContent(state: LibraryUiState, actions: LibraryActions, modifier: Modifier = Modifier)
+@Composable fun LibraryScreen(onAlbum: (String) -> Unit, onArtist: (String) -> Unit, onPlaylist: (String) -> Unit, viewModel: LibraryViewModel = hiltViewModel())
+tags: "library:tab:<TAB>", TAG_LIBRARY_LIST, TAG_LIBRARY_QUERY, "library:row:<key>"
+```
+
+**Acceptance Criteria:**
+- Four tabs (each at least 48dp); the filter field and sort chips (Recently added, A to Z) feed the repository, which sorts and filters in SQL; rows are keyed by stable IDs (track ID, album ID, artist ID, playlist ID); a 1 500-song list scrolls and the last row is reachable.
+- Empty tab (e.g. "Like or add songs to see them here") and "No matches" are different states; a repository failure shows the error state; the screen works offline (all data is local; only opening a page needs the network, and those pages have their own offline state).
+- Tapping a song plays the visible list from that row (`PlayerController.play`, which windows to 500 and emits the message for longer lists); Play and Shuffle play the whole filtered list (Shuffle shuffles first); the song menu offers Play next, Add to queue, Remove like, Remove from library (Task 20 adds Add to playlist).
+
+- [ ] **Step 1: Failing tests.**
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.library
+
+import app.aria.domain.*
+import app.aria.domain.testing.*
+import app.aria.music.player.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.*
+import kotlin.test.*
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class LibraryViewModelTest {
+    private val dispatcher = UnconfinedTestDispatcher()
+    @BeforeTest fun setMain() = Dispatchers.setMain(dispatcher)
+    @AfterTest fun resetMain() = Dispatchers.resetMain()
+
+    private class Env(scope: kotlinx.coroutines.CoroutineScope, val library: LibraryRepository = FakeLibraryRepository()) {
+        val playlists = FakePlaylistRepository(); val engine = FakePlaybackEngine(); val messages = mutableListOf<PlayerMessage>()
+        val controller = PlayerController(engine, ServiceLauncher { }, scope)
+        val vm = LibraryViewModel(library, playlists, controller).also { scope.launch { it.state.collect { } }; scope.launch { controller.messages.collect { m -> messages += m } } }
+    }
+
+    @Test fun emptyThenSongsThenNoMatches() = runTest {
+        val e = Env(backgroundScope); assertEquals(LibraryContent.Empty, e.vm.state.value.content)
+        e.library.setInLibrary(Samples.track(1), true); e.library.setInLibrary(Samples.track(2, "Zebra"), true)
+        assertEquals(2, (e.vm.state.value.content as LibraryContent.Songs).rows.size)
+        e.vm.setQuery("nothing-like-this"); assertEquals(LibraryContent.NoMatches, e.vm.state.value.content)
+    }
+
+    @Test fun sortAndFilterAreAppliedByTheRepository() = runTest {
+        val e = Env(backgroundScope); e.library.setInLibrary(Samples.track(1, "Banana"), true); e.library.setInLibrary(Samples.track(2, "apple"), true)
+        assertEquals(listOf("apple", "Banana"), run { e.vm.setSort(LibrarySort.TITLE); (e.vm.state.value.content as LibraryContent.Songs).rows.map { it.track.title } })
+        e.vm.setQuery("ban"); assertEquals(listOf("Banana"), (e.vm.state.value.content as LibraryContent.Songs).rows.map { it.track.title })
+    }
+
+    @Test fun tabsSwitchContent() = runTest {
+        val e = Env(backgroundScope); e.library.setAlbumSaved(Samples.album(1), true); e.library.setArtistFollowed(Samples.artist(1), true); e.playlists.create("Mix")
+        e.vm.setTab(LibraryTab.ALBUMS); assertEquals(listOf(Samples.album(1)), (e.vm.state.value.content as LibraryContent.Albums).rows)
+        e.vm.setTab(LibraryTab.ARTISTS); assertEquals(listOf(Samples.artist(1)), (e.vm.state.value.content as LibraryContent.Artists).rows)
+        e.vm.setTab(LibraryTab.PLAYLISTS); assertEquals(listOf("Mix"), (e.vm.state.value.content as LibraryContent.Playlists).rows.map { it.title })
+    }
+
+    @Test fun playingFromARowQueuesTheVisibleListFromThere() = runTest {
+        val e = Env(backgroundScope); val tracks = Samples.tracks(3); tracks.forEach { e.library.setInLibrary(it, true) }
+        val shown = (e.vm.state.value.content as LibraryContent.Songs).rows.map { it.track }
+        e.vm.play(shown, 1)
+        assertEquals(listOf(shown to 1), e.engine.playNowCalls)
+    }
+
+    @Test fun listsLongerThanTheCapQueueAWindowAndTellTheUser() = runTest {
+        val e = Env(backgroundScope); val many = Samples.tracks(700)
+        e.vm.play(many, 650)
+        assertEquals(50, e.engine.playNowCalls.single().first.size); assertEquals(listOf<PlayerMessage>(PlayerMessage.QueueWindowed(50, 700)), e.messages)
+    }
+
+    @Test fun playAllAndShuffleAllUseTheWholeFilteredList() = runTest {
+        val e = Env(backgroundScope); Samples.tracks(5).forEach { e.library.setInLibrary(it, true) }
+        e.vm.playAll(); e.vm.shuffleAll()
+        assertEquals(5, e.engine.playNowCalls[0].first.size); assertEquals(5, e.engine.playNowCalls[1].first.size)
+        assertEquals(e.engine.playNowCalls[0].first.toSet(), e.engine.playNowCalls[1].first.toSet())
+    }
+
+    @Test fun songActionsWriteTheLibraryOrQueue() = runTest {
+        val e = Env(backgroundScope); val t = Samples.track(1); e.library.setLiked(t, true)
+        e.vm.trackAction(t, LibraryTrackAction.UNLIKE); assertFalse(e.library.isLiked(t.id).first())
+        e.vm.trackAction(t, LibraryTrackAction.REMOVE_FROM_LIBRARY); assertFalse(e.library.isInLibrary(t.id).first())
+        e.vm.trackAction(t, LibraryTrackAction.PLAY_NEXT); assertTrue("playNext" in e.engine.calls)
+    }
+
+    @Test fun repositoryFailureShowsTheErrorState() = runTest {
+        val broken = object : LibraryRepository by FakeLibraryRepository() { override fun songs(query: String, sort: LibrarySort) = flow<List<LibrarySong>> { error("db") } }
+        assertEquals(LibraryContent.Error, Env(backgroundScope, broken).vm.state.value.content)
+    }
+}
+```
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.library
+
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.unit.dp
+import app.aria.domain.*
+import app.aria.domain.testing.Samples
+import app.aria.music.R
+import app.aria.music.ui.AriaTestTheme
+import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.Test
+
+class LibraryTest {
+    @get:Rule val rule = createComposeRule()
+    private fun str(id: Int, vararg a: Any) = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.getString(id, *a)
+    private val log = mutableListOf<String>()
+    private val actions = LibraryActions(
+        { log += "tab:$it" }, { log += "query:$it" }, { log += "sort:$it" }, { l, i -> log += "play:${l.size}:$i" }, { log += "playAll" }, { log += "shuffleAll" },
+        { t, a -> log += "menu:${t.title}:$a" }, { log += "album:$it" }, { log += "artist:$it" }, { log += "playlist:$it" },
+    )
+    private fun songs(n: Int) = LibraryContent.Songs(Samples.tracks(n).map { LibrarySong(it, it.title.endsWith("1")) })
+    private fun show(s: LibraryUiState, pseudo: Boolean = false, fontScale: Float = 1f) { log.clear(); rule.setContent { AriaTestTheme(pseudo, fontScale) { LibraryContent(s, actions) } } }
+    private fun state(c: LibraryContent, tab: LibraryTab = LibraryTab.SONGS, q: String = "") = LibraryUiState(tab, q, LibrarySort.RECENTLY_ADDED, c)
+
+    @Test fun tabsAreBigEnoughAndSwitch() {
+        show(state(songs(2)))
+        for (t in LibraryTab.entries) rule.onNodeWithTag("library:tab:${t.name}").assertHeightIsAtLeast(48.dp)
+        rule.onNodeWithTag("library:tab:ALBUMS").performClick(); assertEquals(listOf("tab:ALBUMS"), log)
+    }
+
+    @Test fun songRowsPlayFromTheTappedRowAndPlayShuffleWork() {
+        show(state(songs(3)))
+        rule.onNodeWithText("Song 3").performClick(); rule.onNodeWithText(str(R.string.library_play_all)).performClick(); rule.onNodeWithText(str(R.string.library_shuffle_all)).performClick()
+        assertEquals(listOf("play:3:2", "playAll", "shuffleAll"), log)
+    }
+
+    @Test fun emptyAndNoMatchesAreDifferent() {
+        show(state(LibraryContent.Empty)); rule.onNodeWithText(str(R.string.library_empty_songs)).assertExists()
+    }
+    @Test fun noMatches() { show(state(LibraryContent.NoMatches, q = "zzz")); rule.onNodeWithText(str(R.string.library_no_matches)).assertExists() }
+    @Test fun errorAndLoading() { show(state(LibraryContent.Error)); rule.onNodeWithTag("state:error").assertExists() }
+    @Test fun loadingState() { show(state(LibraryContent.Loading)); rule.onNodeWithTag("state:loading").assertExists() }
+
+    @Test fun albumsArtistsPlaylistsNavigate() {
+        show(state(LibraryContent.Albums(listOf(Samples.album(1))), LibraryTab.ALBUMS)); rule.onNodeWithText("Album 1").performClick()
+    }
+    @Test fun artistRowNavigates() { show(state(LibraryContent.Artists(listOf(Samples.artist(2))), LibraryTab.ARTISTS)); rule.onNodeWithText("Artist 2").performClick(); assertEquals(listOf("artist:UC2"), log) }
+    @Test fun playlistRowNavigates() { show(state(LibraryContent.Playlists(listOf(Samples.playlist(3))), LibraryTab.PLAYLISTS)); rule.onNodeWithText("Playlist 3").performClick(); assertEquals(listOf("playlist:PL3"), log) }
+
+    @Test fun sortAndQueryFeedTheActions() {
+        show(state(songs(2))); rule.onNodeWithText(str(R.string.library_sort_title)).performClick(); rule.onNodeWithTag(TAG_LIBRARY_QUERY).performTextInput("ab")
+        assertEquals(listOf("sort:TITLE", "query:ab"), log)
+    }
+
+    @Test fun aLargeListScrollsToTheEnd() {
+        show(state(songs(1_500))); rule.onNodeWithTag(TAG_LIBRARY_LIST).performScrollToKey("song:track001500"); rule.onNodeWithText("Song 1500").assertIsDisplayed()
+    }
+
+    @Test fun songMenuHasLibraryActions() {
+        show(state(songs(1))); rule.onNodeWithContentDescription(str(R.string.track_more, "Song 1")).performClick(); rule.onNodeWithText(str(R.string.library_remove_from_library)).performClick()
+        assertEquals(listOf("menu:Song 1:REMOVE_FROM_LIBRARY"), log)
+    }
+
+    @Test fun survivesPseudolocaleAndBigFonts() { show(state(songs(3)), pseudo = true, fontScale = 2f); rule.onNodeWithTag("library:tab:SONGS").assertIsDisplayed() }
+}
+```
+
+  (Split the multi-`show` tests as noted for Task 16; `performScrollToKey` needs the list items keyed as `song:<raw id>` with the item `key` returned by `TrackRow` hosting `LazyColumn` — the key string is `"song:" + track.id.raw`.)
+- [ ] **Step 2:** Push; CI fails. Expected: FAIL.
+- [ ] **Step 3: Implement.** Strings: `library_tab_songs` "Songs", `library_tab_albums` "Albums", `library_tab_artists` "Artists", `library_tab_playlists` "Playlists", `library_play_all` "Play", `library_shuffle_all` "Shuffle", `library_sort_recent` "Recently added", `library_sort_title` "A to Z", `library_filter_hint` "Filter this list", `library_empty_songs` "Like or add songs to see them here", `library_empty_albums` "Save albums to see them here", `library_empty_artists` "Follow artists to see them here", `library_empty_playlists` "Create a playlist to see it here", `library_no_matches` "Nothing matches your filter", `library_remove_like` "Remove like", `library_remove_from_library` "Remove from library". Remove `library_placeholder`. ViewModel:
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.library
+
+@HiltViewModel
+class LibraryViewModel @Inject constructor(
+    private val library: LibraryRepository, private val playlists: PlaylistRepository, private val controller: PlayerController,
+) : ViewModel() {
+    private val tab = MutableStateFlow(LibraryTab.SONGS)
+    private val query = MutableStateFlow("")
+    private val sort = MutableStateFlow(LibrarySort.RECENTLY_ADDED)
+
+    private data class Req(val tab: LibraryTab, val query: String, val sort: LibrarySort)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val content: Flow<LibraryContent> = combine(tab, query.debounceIfTyping(), sort) { t, q, s -> Req(t, q, s) }.flatMapLatest { r ->
+        val rows: Flow<LibraryContent> = when (r.tab) {
+            LibraryTab.SONGS -> library.songs(r.query, r.sort).map { LibraryContent.Songs(it) }
+            LibraryTab.ALBUMS -> library.albums(r.query, r.sort).map { LibraryContent.Albums(it) }
+            LibraryTab.ARTISTS -> library.artists(r.query, r.sort).map { LibraryContent.Artists(it) }
+            LibraryTab.PLAYLISTS -> playlists.playlists(r.query, r.sort).map { LibraryContent.Playlists(it) }
+        }
+        rows.map { c -> if (c.isEmpty()) (if (r.query.isBlank()) LibraryContent.Empty else LibraryContent.NoMatches) else c }
+            .onStart { emit(LibraryContent.Loading) }.catch { emit(LibraryContent.Error) }
+    }
+
+    val state: StateFlow<LibraryUiState> = combine(tab, query, sort, content) { t, q, s, c -> LibraryUiState(t, q, s, c) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState(LibraryTab.SONGS, "", LibrarySort.RECENTLY_ADDED, LibraryContent.Loading))
+
+    fun setTab(t: LibraryTab) { tab.value = t }
+    fun setQuery(q: String) { query.value = q }
+    fun setSort(s: LibrarySort) { sort.value = s }
+    fun play(tracks: List<Track>, index: Int) = controller.play(tracks, index)
+    private fun visibleTracks(): List<Track> = (state.value.content as? LibraryContent.Songs)?.rows?.map { it.track }.orEmpty()
+    fun playAll() = controller.play(visibleTracks(), 0)
+    fun shuffleAll() = controller.play(visibleTracks().shuffled(), 0)
+    fun trackAction(t: Track, a: LibraryTrackAction) {
+        when (a) {
+            LibraryTrackAction.PLAY_NEXT -> controller.playNext(t)
+            LibraryTrackAction.ADD_TO_QUEUE -> controller.addToQueue(listOf(t))
+            LibraryTrackAction.UNLIKE -> viewModelScope.launch { library.setLiked(t, false) }
+            LibraryTrackAction.REMOVE_FROM_LIBRARY -> viewModelScope.launch { library.setInLibrary(t, false) }
+        }
+    }
+}
+
+private fun LibraryContent.isEmpty() = when (this) {
+    is LibraryContent.Songs -> rows.isEmpty(); is LibraryContent.Albums -> rows.isEmpty()
+    is LibraryContent.Artists -> rows.isEmpty(); is LibraryContent.Playlists -> rows.isEmpty(); else -> false
+}
+```
+
+  (`query.debounceIfTyping()` is `query.debounce(150)`; the test `Env` uses an unconfined dispatcher, where `debounce` still delays: if a test needs an immediate result, use `query` directly and put the debounce in the composable's text field instead. Decide in implementation: debounce in the composable (`LaunchedEffect(text) { delay(150); actions.onQuery(text) }`) and drop the operator here, so the ViewModel stays synchronous and the tests above pass as written.) `LibraryScreen.kt`: `LibraryContent` = `Column { ScrollableTabRow-free `Row` of four `Tab`s (`Modifier.testTag("library:tab:${t.name}").heightIn(min = 48.dp)`), a filter `OutlinedTextField` (tag `TAG_LIBRARY_QUERY`, hint `library_filter_hint`), a chip row (`FilterChip` Recently added / A to Z), on the Songs tab a Play and a Shuffle `Button`, then `when (content)`: `Loading -> LoadingState()`, `Empty -> EmptyState(emptyTitleFor(tab))`, `NoMatches -> EmptyState(R.string.library_no_matches)`, `Error -> ErrorState(onRetry = { actions.onTab(state.tab) })`, `Songs -> LazyColumn(Modifier.testTag(TAG_LIBRARY_LIST)) { itemsIndexed(rows, key = { _, r -> "song:" + r.track.id.raw }) { i, r -> TrackRow(r.track, onClick = { actions.onPlaySong(rows.map { it.track }, i) }, onMenu = { }, extraActions = libraryExtras(r)) } }` where the library menu uses `LibraryTrackAction` (Play next, Add to queue, Remove like shown only when `liked`, Remove from library) through `extraActions` and a `TrackRow` flag `showDefaultMenu = false`, `Albums/Artists/Playlists -> LazyColumn` of keyed `ListItem` rows (`"album:" + id`, `"artist:" + id`, `"playlist:" + id`) that call the open callbacks }`. Add the parameter `showDefaultMenu: Boolean = true` to `TrackRow` (Task 16 file) in this task. `rows.map { it.track }` is computed once with `remember(rows)`. `AriaNavHost`: `composable<LibraryRoute> { LibraryScreen(onAlbum = ..., onArtist = ..., onPlaylist = { nav.navigate(PlaylistRoute(it, local = true)) }) }`.
+- [ ] **Step 4:** Push; green. **Commit** `feat(app): Library screen with SQL-backed lists and play windows`.
+
+---
+
+### Task 19: Album, Artist and remote Playlist pages (replace the temporary routes)
+
+Slice 3. Detail pages load from the network (nothing cached in this sub-project), each with loading, error, offline and content states.
+
+**Files:**
+- Create: `app/src/main/kotlin/app/aria/music/ui/detail/{AlbumViewModel,AlbumScreen,ArtistViewModel,ArtistScreen,PlaylistViewModel,PlaylistScreen}.kt`, `app/src/test/resources/robolectric.properties` (`sdk=35`)
+- Modify: `app/build.gradle.kts` (`testImplementation(libs.robolectric)`), `strings.xml`, `plurals.xml`, `ui/shell/AriaNavHost.kt` (replace the `coming_soon` routes; keep one for local playlists until Task 20)
+- Test: `app/src/test/kotlin/app/aria/music/ui/detail/{AlbumViewModelTest,ArtistViewModelTest,PlaylistViewModelTest}.kt`, `app/src/androidTest/kotlin/app/aria/music/ui/detail/DetailPagesTest.kt`
+
+**Interfaces:**
+- Consumes: `BrowseSource`, `LibraryRepository` (`isAlbumSaved`, `setAlbumSaved`, `isArtistFollowed`, `setArtistFollowed`, `setLiked`), `PlayerController`, `NetworkMonitor`, `AlbumDetail`, `ArtistDetail`, `PlaylistDetail`, `TrackPage`, `TrackRow`, `SavedStateHandle` (the route arguments are stored under the property names: `id`).
+- Produces:
+
+```kotlin
+sealed interface AlbumUiState { data object Loading; data class Content(val detail: AlbumDetail, val saved: Boolean) : AlbumUiState; data object Error; data object Offline }
+@HiltViewModel class AlbumViewModel @Inject constructor(handle: SavedStateHandle, browse: BrowseSource, library: LibraryRepository, controller: PlayerController, network: NetworkMonitor) : ViewModel() {
+    val state: StateFlow<AlbumUiState>; fun retry(); fun play(index: Int = 0); fun shuffle(); fun addToQueue(); fun toggleSaved(); fun trackAction(t: Track, a: TrackMenuAction) }
+sealed interface ArtistUiState { data object Loading; data class Content(val detail: ArtistDetail, val followed: Boolean) : ArtistUiState; data object Error; data object Offline }
+@HiltViewModel class ArtistViewModel @Inject constructor(handle: SavedStateHandle, browse: BrowseSource, library: LibraryRepository, controller: PlayerController, network: NetworkMonitor) : ViewModel() {
+    val state: StateFlow<ArtistUiState>; fun retry(); fun playTop(); fun shuffleTop(); fun playShelfSongs(tracks: List<Track>, index: Int); fun toggleFollowed(); fun trackAction(t: Track, a: TrackMenuAction) }
+sealed interface PlaylistUiState { data object Loading; data class Content(val detail: PlaylistDetail, val loadingMore: Boolean, val moreFailed: Boolean) : PlaylistUiState; data object Error; data object Offline }
+@HiltViewModel class PlaylistViewModel @Inject constructor(handle: SavedStateHandle, browse: BrowseSource, library: LibraryRepository, controller: PlayerController, network: NetworkMonitor) : ViewModel() {
+    val state: StateFlow<PlaylistUiState>; fun retry(); fun loadMore(); fun play(index: Int = 0); fun shuffle(); fun addToQueue(); fun trackAction(t: Track, a: TrackMenuAction) }
+data class AlbumActions(val onBack: () -> Unit, val onPlay: (Int) -> Unit, val onShuffle: () -> Unit, val onAddToQueue: () -> Unit, val onToggleSaved: () -> Unit, val onTrackMenu: (Track, TrackMenuAction) -> Unit, val onOpenAlbum: (String) -> Unit, val onRetry: () -> Unit)
+data class ArtistActions(val onBack: () -> Unit, val onPlayTop: () -> Unit, val onShuffleTop: () -> Unit, val onToggleFollowed: () -> Unit, val onPlaySongs: (List<Track>, Int) -> Unit, val onOpenAlbum: (String) -> Unit, val onOpenArtist: (String) -> Unit, val onOpenPlaylist: (String) -> Unit, val onTrackMenu: (Track, TrackMenuAction) -> Unit, val onRetry: () -> Unit)
+data class PlaylistActions(val onBack: () -> Unit, val onPlay: (Int) -> Unit, val onShuffle: () -> Unit, val onAddToQueue: () -> Unit, val onLoadMore: () -> Unit, val onTrackMenu: (Track, TrackMenuAction) -> Unit, val onRetry: () -> Unit)
+@Composable fun AlbumContent(state: AlbumUiState, actions: AlbumActions, modifier: Modifier = Modifier); fun ArtistContent(state: ArtistUiState, actions: ArtistActions, modifier: Modifier = Modifier); fun PlaylistContent(state: PlaylistUiState, actions: PlaylistActions, modifier: Modifier = Modifier)
+@Composable fun AlbumScreen(onBack, onAlbum); fun ArtistScreen(onBack, onAlbum, onArtist, onPlaylist); fun PlaylistScreen(onBack)
+tags: TAG_DETAIL_SAVE, TAG_DETAIL_PLAY, TAG_DETAIL_SHUFFLE, TAG_DETAIL_MORE_FAILED
+```
+
+**Acceptance Criteria:**
+- Each page: `Loading` then `Content`, `Error` (with Retry that reloads), `Offline` (no network call when `NetworkMonitor.online` is false); every network failure is a returned `Result`, never a crash.
+- Album: header (artwork, title, artists, year), Play, Shuffle, Add to queue, Save to library toggle (description "Save to library"/"Remove from library", reflects `isAlbumSaved`), tracks play the album from the tapped one, "Other versions" tiles open other albums. Artist: Play and Shuffle use `topTracks`; Follow toggle; shelves of songs (play from there), albums, artists, playlists. Playlist: tracks with automatic "load more" (`playlistMore`, de-duplicated; a failure shows an inline Retry and keeps the loaded tracks); Play/Shuffle/Add to queue use the loaded tracks (windowed by the controller above 500).
+- Opening a missing ID shows `Error`, not a crash; the temporary `coming_soon` routes for album and artist and remote playlist are gone (local playlists keep one until Task 20).
+
+- [ ] **Step 1: Failing tests** (`@RunWith(RobolectricTestRunner::class)` because `SavedStateHandle` may touch Android classes):
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.detail
+
+import androidx.lifecycle.SavedStateHandle
+import app.aria.domain.*
+import app.aria.domain.testing.*
+import app.aria.music.player.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.*
+import org.junit.After
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import kotlin.test.*
+
+@OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
+class AlbumViewModelTest {
+    @Before fun setMain() = Dispatchers.setMain(UnconfinedTestDispatcher())
+    @After fun resetMain() = Dispatchers.resetMain()
+
+    private class Env(scope: kotlinx.coroutines.CoroutineScope, online: Boolean = true) {
+        val browse = FakeBrowseSource(); val library = FakeLibraryRepository(); val engine = FakePlaybackEngine(); val network = FakeNetworkMonitor(online)
+        val detail = AlbumDetail(Samples.album(1), Samples.tracks(3), listOf(Samples.album(2)))
+        init { browse.albums["MPREb_1"] = Result.success(detail) }
+        val vm = AlbumViewModel(SavedStateHandle(mapOf("id" to "MPREb_1")), browse, library, PlayerController(engine, ServiceLauncher { }, scope), network)
+            .also { scope.launch { it.state.collect { } } }
+    }
+
+    @Test fun loadsContentWithSavedFlag() = runTest {
+        val e = Env(backgroundScope); val c = e.vm.state.value as AlbumUiState.Content
+        assertEquals(e.detail, c.detail); assertFalse(c.saved)
+    }
+    @Test fun toggleSavedWritesTheLibraryAndFlipsTheFlag() = runTest {
+        val e = Env(backgroundScope); e.vm.toggleSaved()
+        assertTrue((e.vm.state.value as AlbumUiState.Content).saved); assertEquals(listOf(Samples.album(1)), e.library.albums("", LibrarySort.TITLE).first())
+        e.vm.toggleSaved(); assertFalse((e.vm.state.value as AlbumUiState.Content).saved)
+    }
+    @Test fun playStartsFromTheTappedTrackAndShuffleUsesAllTracks() = runTest {
+        val e = Env(backgroundScope); e.vm.play(2); e.vm.shuffle(); e.vm.addToQueue()
+        assertEquals(Samples.tracks(3) to 2, e.engine.playNowCalls[0]); assertEquals(3, e.engine.playNowCalls[1].first.size); assertEquals(1, e.engine.addedToEnd.size)
+    }
+    @Test fun missingAlbumIsAnErrorAndRetryReloads() = runTest {
+        val e = Env(backgroundScope); e.browse.albums["MPREb_1"] = Result.failure(java.io.IOException())
+        e.vm.retry(); assertEquals(AlbumUiState.Error, e.vm.state.value)
+        e.browse.albums["MPREb_1"] = Result.success(e.detail); e.vm.retry(); assertTrue(e.vm.state.value is AlbumUiState.Content)
+    }
+    @Test fun offlineDoesNotCallTheNetwork() = runTest {
+        val e = Env(backgroundScope, online = false); assertEquals(AlbumUiState.Offline, e.vm.state.value)
+    }
+    @Test fun trackMenuActionsReachTheControllerAndLibrary() = runTest {
+        val e = Env(backgroundScope); val t = Samples.track(1)
+        e.vm.trackAction(t, TrackMenuAction.PLAY_NEXT); e.vm.trackAction(t, TrackMenuAction.ADD_TO_QUEUE); e.vm.trackAction(t, TrackMenuAction.LIKE)
+        assertTrue("playNext" in e.engine.calls); assertTrue(e.library.isLiked(t.id).first())
+    }
+}
+```
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.detail
+
+import androidx.lifecycle.SavedStateHandle
+import app.aria.domain.*
+import app.aria.domain.testing.*
+import app.aria.music.player.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.*
+import org.junit.After
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import kotlin.test.*
+
+@OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
+class ArtistViewModelTest {
+    @Before fun setMain() = Dispatchers.setMain(UnconfinedTestDispatcher())
+    @After fun resetMain() = Dispatchers.resetMain()
+
+    private class Env(scope: kotlinx.coroutines.CoroutineScope) {
+        val browse = FakeBrowseSource(); val library = FakeLibraryRepository(); val engine = FakePlaybackEngine()
+        val songs = Shelf("Songs", null, Samples.tracks(2).map { BrowseItem.Song(it) })
+        val detail = ArtistDetail(Samples.artist(1), "About", "1M", listOf(songs, Shelf("Albums", null, listOf(BrowseItem.Album(Samples.album(1))))))
+        init { browse.artists["UC1"] = Result.success(detail) }
+        val vm = ArtistViewModel(SavedStateHandle(mapOf("id" to "UC1")), browse, library, PlayerController(engine, ServiceLauncher { }, scope), FakeNetworkMonitor())
+            .also { scope.launch { it.state.collect { } } }
+    }
+
+    @Test fun contentAndFollowToggle() = runTest {
+        val e = Env(backgroundScope); assertFalse((e.vm.state.value as ArtistUiState.Content).followed)
+        e.vm.toggleFollowed(); assertTrue((e.vm.state.value as ArtistUiState.Content).followed); assertEquals(listOf(Samples.artist(1)), e.library.artists("", LibrarySort.TITLE).first())
+    }
+    @Test fun playAndShuffleUseTheTopTracks() = runTest {
+        val e = Env(backgroundScope); e.vm.playTop(); e.vm.shuffleTop()
+        assertEquals(Samples.tracks(2) to 0, e.engine.playNowCalls[0]); assertEquals(2, e.engine.playNowCalls[1].first.size)
+    }
+    @Test fun playingAShelfSongStartsThere() = runTest { val e = Env(backgroundScope); e.vm.playShelfSongs(Samples.tracks(2), 1); assertEquals(Samples.tracks(2) to 1, e.engine.playNowCalls.single()) }
+    @Test fun failureThenRetry() = runTest {
+        val e = Env(backgroundScope); e.browse.artists["UC1"] = Result.failure(java.io.IOException()); e.vm.retry(); assertEquals(ArtistUiState.Error, e.vm.state.value)
+        e.browse.artists["UC1"] = Result.success(e.detail); e.vm.retry(); assertTrue(e.vm.state.value is ArtistUiState.Content)
+    }
+}
+```
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.detail
+
+import androidx.lifecycle.SavedStateHandle
+import app.aria.domain.*
+import app.aria.domain.testing.*
+import app.aria.music.player.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.*
+import org.junit.After
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import kotlin.test.*
+
+@OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
+class PlaylistViewModelTest {
+    @Before fun setMain() = Dispatchers.setMain(UnconfinedTestDispatcher())
+    @After fun resetMain() = Dispatchers.resetMain()
+
+    private class Env(scope: kotlinx.coroutines.CoroutineScope, online: Boolean = true) {
+        val browse = FakeBrowseSource(); val engine = FakePlaybackEngine()
+        init { browse.playlists["PL1"] = Result.success(PlaylistDetail(Samples.playlist(1), Samples.tracks(2), continuation = "c1")) }
+        val vm = PlaylistViewModel(SavedStateHandle(mapOf("id" to "PL1")), browse, FakeLibraryRepository(), PlayerController(engine, ServiceLauncher { }, scope), FakeNetworkMonitor(online))
+            .also { scope.launch { it.state.collect { } } }
+    }
+
+    @Test fun loadMoreAppendsAndDeduplicatesUntilNoContinuation() = runTest {
+        val e = Env(backgroundScope); e.browse.more["c1"] = Result.success(TrackPage(Samples.tracks(3, from = 2), "c2")); e.browse.more["c2"] = Result.success(TrackPage(Samples.tracks(1, from = 9), null))
+        e.vm.loadMore(); e.vm.loadMore(); e.vm.loadMore()
+        val c = e.vm.state.value as PlaylistUiState.Content
+        assertEquals(listOf(1, 2, 3, 4, 9).map { Samples.track(it) }, c.detail.tracks); assertNull(c.detail.continuation); assertFalse(c.moreFailed)
+    }
+    @Test fun failedLoadMoreKeepsTracksAndCanRetry() = runTest {
+        val e = Env(backgroundScope); e.vm.loadMore()
+        var c = e.vm.state.value as PlaylistUiState.Content; assertTrue(c.moreFailed); assertEquals(2, c.detail.tracks.size)
+        e.browse.more["c1"] = Result.success(TrackPage(Samples.tracks(1, from = 7), null)); e.vm.loadMore()
+        c = e.vm.state.value as PlaylistUiState.Content; assertFalse(c.moreFailed); assertEquals(3, c.detail.tracks.size)
+    }
+    @Test fun playUsesLoadedTracks() = runTest { val e = Env(backgroundScope); e.vm.play(1); assertEquals(Samples.tracks(2) to 1, e.engine.playNowCalls.single()) }
+    @Test fun offlineAndMissing() = runTest {
+        assertEquals(PlaylistUiState.Offline, Env(backgroundScope, online = false).vm.state.value)
+        val e = Env(backgroundScope); e.browse.playlists["PL1"] = Result.failure(java.io.IOException()); e.vm.retry(); assertEquals(PlaylistUiState.Error, e.vm.state.value)
+    }
+}
+```
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.detail
+
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.unit.dp
+import app.aria.domain.*
+import app.aria.domain.testing.Samples
+import app.aria.music.R
+import app.aria.music.ui.AriaTestTheme
+import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.Test
+
+class DetailPagesTest {
+    @get:Rule val rule = createComposeRule()
+    private fun str(id: Int, vararg a: Any) = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.getString(id, *a)
+    private val log = mutableListOf<String>()
+    private val album = AlbumActions({ log += "back" }, { log += "play:$it" }, { log += "shuffle" }, { log += "queue" }, { log += "save" }, { t, a -> log += "menu:${t.title}:$a" }, { log += "album:$it" }, { log += "retry" })
+    private val artist = ArtistActions({ log += "back" }, { log += "playTop" }, { log += "shuffleTop" }, { log += "follow" }, { l, i -> log += "songs:${l.size}:$i" }, { log += "album:$it" }, { log += "artist:$it" }, { log += "playlist:$it" }, { t, a -> log += "menu:${t.title}:$a" }, { log += "retry" })
+    private val playlist = PlaylistActions({ log += "back" }, { log += "play:$it" }, { log += "shuffle" }, { log += "queue" }, { log += "more" }, { t, a -> log += "menu:${t.title}:$a" }, { log += "retry" })
+    private val albumDetail = AlbumDetail(Samples.album(1), Samples.tracks(2), listOf(Samples.album(2)))
+
+    private fun showAlbum(s: AlbumUiState, pseudo: Boolean = false, fontScale: Float = 1f) { log.clear(); rule.setContent { AriaTestTheme(pseudo, fontScale) { AlbumContent(s, album) } } }
+
+    @Test fun albumHeaderActionsAndTracks() {
+        showAlbum(AlbumUiState.Content(albumDetail, saved = false))
+        rule.onNodeWithText("Album 1").assertExists(); rule.onNodeWithTag(TAG_DETAIL_PLAY).performClick(); rule.onNodeWithTag(TAG_DETAIL_SHUFFLE).performClick()
+        rule.onNodeWithTag(TAG_DETAIL_SAVE).assertWidthIsAtLeast(48.dp).performClick(); rule.onNodeWithText("Song 2").performClick(); rule.onNodeWithText("Album 2").performClick()
+        assertEquals(listOf("play:0", "shuffle", "save", "play:1", "album:MPREb_2"), log)
+    }
+    @Test fun saveToggleDescriptionFlips() { showAlbum(AlbumUiState.Content(albumDetail, saved = true)); rule.onNodeWithContentDescription(str(R.string.detail_unsave)).assertExists() }
+    @Test fun albumErrorOfflineLoading() { showAlbum(AlbumUiState.Error); rule.onNodeWithText(str(R.string.retry)).performClick(); assertEquals(listOf("retry"), log) }
+    @Test fun albumOffline() { showAlbum(AlbumUiState.Offline); rule.onNodeWithTag("state:offline").assertIsDisplayed() }
+    @Test fun albumLoading() { showAlbum(AlbumUiState.Loading); rule.onNodeWithTag("state:loading").assertIsDisplayed() }
+    @Test fun albumSurvivesPseudolocaleAndBigFonts() { showAlbum(AlbumUiState.Content(albumDetail, false), pseudo = true, fontScale = 2f); rule.onNodeWithTag(TAG_DETAIL_PLAY).assertExists() }
+
+    @Test fun artistPageShelvesAndActions() {
+        val shelves = listOf(Shelf("Songs", null, Samples.tracks(2).map { BrowseItem.Song(it) }), Shelf("Albums", null, listOf(BrowseItem.Album(Samples.album(1)))))
+        log.clear(); rule.setContent { AriaTestTheme { ArtistContent(ArtistUiState.Content(ArtistDetail(Samples.artist(1), "About text", "1M", shelves), followed = false), artist) } }
+        rule.onNodeWithText("About text").assertExists(); rule.onNodeWithTag(TAG_DETAIL_PLAY).performClick(); rule.onNodeWithTag(TAG_DETAIL_SAVE).performClick(); rule.onNodeWithText("Song 2").performClick(); rule.onNodeWithText("Album 1").performClick()
+        assertEquals(listOf("playTop", "follow", "songs:2:1", "album:MPREb_1"), log)
+    }
+
+    @Test fun playlistShowsMoreFailedWithRetryAndLoadsMoreAtTheEnd() {
+        log.clear(); rule.setContent { AriaTestTheme { PlaylistContent(PlaylistUiState.Content(PlaylistDetail(Samples.playlist(1), Samples.tracks(30), "c"), loadingMore = false, moreFailed = true), playlist) } }
+        rule.onNodeWithTag("detail:list").performScrollToIndex(31); rule.onNodeWithTag(TAG_DETAIL_MORE_FAILED).assertExists(); rule.onNodeWithText(str(R.string.retry)).performClick()
+        assert("more" in log)
+    }
+}
+```
+
+- [ ] **Step 2:** Push; CI fails. Expected: FAIL.
+- [ ] **Step 3: Implement.** Add `testImplementation(libs.robolectric)` to `app/build.gradle.kts` and `app/src/test/resources/robolectric.properties` containing `sdk=35`. Strings: `detail_play` "Play", `detail_shuffle` "Shuffle", `detail_add_to_queue` "Add to queue", `detail_save` "Save to library", `detail_unsave` "Remove from library", `detail_follow` "Follow", `detail_unfollow` "Unfollow", `detail_other_versions` "Other versions", `detail_about` "About", `detail_more_failed` "Could not load more songs", `detail_loading_more` "Loading more songs". Plural: `<plurals name="detail_track_count"><item quantity="one">%1$d song</item><item quantity="other">%1$d songs</item></plurals>`. Each ViewModel follows this skeleton (Album shown; Artist and Playlist differ only in their calls, below):
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.detail
+
+@HiltViewModel
+class AlbumViewModel @Inject constructor(
+    handle: SavedStateHandle, private val browse: BrowseSource, private val library: LibraryRepository,
+    private val controller: PlayerController, private val network: NetworkMonitor,
+) : ViewModel() {
+    private val id: String = checkNotNull(handle.get<String>("id")) { "AlbumRoute id missing" }
+    private sealed interface Load { data object Loading : Load; data class Done(val detail: AlbumDetail) : Load; data object Failed : Load; data object Offline : Load }
+    private val load = MutableStateFlow<Load>(Load.Loading)
+
+    init { retry() }
+
+    fun retry() {
+        viewModelScope.launch {
+            if (!network.online.value) { load.value = Load.Offline; return@launch }
+            load.value = Load.Loading
+            load.value = browse.album(id).fold({ Load.Done(it) }, { Load.Failed })
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val state: StateFlow<AlbumUiState> = load.flatMapLatest { l ->
+        when (l) {
+            Load.Loading -> flowOf(AlbumUiState.Loading); Load.Failed -> flowOf(AlbumUiState.Error); Load.Offline -> flowOf(AlbumUiState.Offline)
+            is Load.Done -> library.isAlbumSaved(l.detail.album.id).map { AlbumUiState.Content(l.detail, it) }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AlbumUiState.Loading)
+
+    private fun detail() = (state.value as? AlbumUiState.Content)?.detail
+    fun play(index: Int = 0) { detail()?.let { controller.play(it.tracks, index) } }
+    fun shuffle() { detail()?.let { controller.play(it.tracks.shuffled(), 0) } }
+    fun addToQueue() { detail()?.let { controller.addToQueue(it.tracks) } }
+    fun toggleSaved() { val c = state.value as? AlbumUiState.Content ?: return; viewModelScope.launch { library.setAlbumSaved(c.detail.album, !c.saved) } }
+    fun trackAction(t: Track, a: TrackMenuAction) {
+        when (a) {
+            TrackMenuAction.PLAY_NEXT -> controller.playNext(t); TrackMenuAction.ADD_TO_QUEUE -> controller.addToQueue(listOf(t))
+            TrackMenuAction.LIKE -> viewModelScope.launch { library.setLiked(t, true) }
+        }
+    }
+}
+```
+
+  `ArtistViewModel` is the same with `browse.artist(id)`, `Load.Done(detail: ArtistDetail)`, content `ArtistUiState.Content(l.detail, followed)` from `library.isArtistFollowed(l.detail.artist.id)`, and `fun playTop() { detail()?.topTracks?.takeIf { it.isNotEmpty() }?.let { controller.play(it, 0) } }`, `fun shuffleTop() { ... controller.play(it.shuffled(), 0) }`, `fun playShelfSongs(tracks: List<Track>, index: Int) = controller.play(tracks, index)`, `fun toggleFollowed() { ... library.setArtistFollowed(c.detail.artist, !c.followed) }`. `PlaylistViewModel` keeps `MutableStateFlow<PlaylistUiState>` directly: `retry()` loads `browse.playlist(id)` into `Content(detail, loadingMore = false, moreFailed = false)`; `loadMore()`:
+
+```kotlin
+    private var loadingMore = false
+    fun loadMore() {
+        val c = state.value as? PlaylistUiState.Content ?: return
+        val token = c.detail.continuation ?: return
+        if (loadingMore) return
+        loadingMore = true
+        state.value = c.copy(loadingMore = true, moreFailed = false)
+        viewModelScope.launch {
+            browse.playlistMore(token).fold(
+                { page ->
+                    val known = c.detail.tracks.mapTo(HashSet()) { it.id }
+                    state.value = PlaylistUiState.Content(c.detail.copy(tracks = c.detail.tracks + page.tracks.filter { known.add(it.id) }, continuation = page.continuation), false, false)
+                },
+                { state.value = c.copy(loadingMore = false, moreFailed = true) },
+            )
+            loadingMore = false
+        }
+    }
+```
+
+  (with `val state` exposed as `StateFlow` over a private `MutableStateFlow`; the test `AlbumViewModelTest`-style `.collect` works with it.) Screens: each `XContent` is a `LazyColumn(Modifier.testTag("detail:list"))` with a header item (artwork 160dp via `AriaImage`, title, subtitle line from data, a track-count plural for albums and playlists, a row of `Button(TAG_DETAIL_PLAY)` "Play", `OutlinedButton(TAG_DETAIL_SHUFFLE)` "Shuffle", `IconButton(onAddToQueue)`, and the 48dp save/follow `IconButton(Modifier.testTag(TAG_DETAIL_SAVE))` with `AriaIcons.Favorite`/`FavoriteBorder` and the description from `detail_save`/`detail_unsave` or `detail_follow`/`detail_unfollow`), then `itemsIndexed(tracks, key = { i, t -> "track:$i:${t.id.raw}" })` of `TrackRow(onClick = { actions.onPlay(i) }, onMenu = { a -> actions.onTrackMenu(track, a) })`; albums add an "Other versions" `LazyRow` of tiles; artists render the description (`detail_about`), then each shelf like Home's `ShelfRow` (reuse: move `ShelfRow` and `Tile` from `HomeScreen.kt` to `ui/common/Shelves.kt` in this task and import them in both); playlists trigger `actions.onLoadMore()` from a `LaunchedEffect` when the last item becomes visible (`snapshotFlow { listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index }`) and render a footer (`detail_loading_more` spinner, or `Row(Modifier.testTag(TAG_DETAIL_MORE_FAILED)) { Text(detail_more_failed); TextButton(onClick = actions.onLoadMore) { Text(retry) } }`). Loading/Error/Offline render the shared states inside a column with a back `IconButton` on top. `AriaNavHost`: replace the temporary entries: `composable<AlbumRoute> { AlbumScreen(onBack = { nav.popBackStack() }, onAlbum = { nav.navigate(AlbumRoute(it)) }) }`, `composable<ArtistRoute> { ArtistScreen(onBack = ..., onAlbum = ..., onArtist = { nav.navigate(ArtistRoute(it)) }, onPlaylist = { nav.navigate(PlaylistRoute(it, local = false)) }) }`, `composable<PlaylistRoute> { entry -> if (entry.toRoute<PlaylistRoute>().local) EmptyState(R.string.coming_soon) else PlaylistScreen(onBack = { nav.popBackStack() }) }`.
+- [ ] **Step 4:** Push; green on `verify`, `app-ui`. **Commit** `feat(app): album, artist and playlist pages`.
+
+---
+
+### Task 20: Playlist management UI: create, rename, delete, add tracks, reorder (transactional)
+
+Slice 3. The reorder step is the third item in the cut order; everything else stays.
+
+**Files:**
+- Create: `app/src/main/kotlin/app/aria/music/ui/playlists/{LocalPlaylistViewModel,LocalPlaylistScreen,PlaylistPicker,NameDialog}.kt`
+- Modify: `strings.xml`, `plurals.xml`, `ui/shell/AriaNavHost.kt`, `ui/library/{LibraryViewModel,LibraryScreen}.kt` (New playlist), `ui/search/SearchScreen.kt`, `ui/library/LibraryScreen.kt`, `ui/detail/{AlbumScreen,ArtistScreen,PlaylistScreen}.kt`, `ui/home/HomeScreen.kt` (Add to playlist in track menus)
+- Test: `app/src/test/kotlin/app/aria/music/ui/playlists/{LocalPlaylistViewModelTest,PlaylistPickerViewModelTest}.kt`, `app/src/androidTest/kotlin/app/aria/music/ui/playlists/PlaylistsTest.kt`
+
+**Interfaces:**
+- Consumes: `PlaylistRepository` (`create`, `rename`, `delete`, `addTracks`, `removeEntry`, `reorder`, `playlist`, `tracks`, `playlists`), `PlayerController`, `TrackRow(extraActions)`.
+- Produces:
+
+```kotlin
+sealed interface LocalPlaylistUiState { data object Loading; data class Content(val playlist: PlaylistRef, val rows: List<PlaylistTrackRow>) : LocalPlaylistUiState; data object NotFound; data object Error }
+@HiltViewModel class LocalPlaylistViewModel @Inject constructor(handle: SavedStateHandle, playlists: PlaylistRepository, controller: PlayerController) : ViewModel() {
+    val state: StateFlow<LocalPlaylistUiState>; val deleted: StateFlow<Boolean>
+    fun play(index: Int = 0); fun shuffle(); fun addToQueue(); fun rename(name: String); fun delete(); fun remove(entryId: Int); fun moveUp(entryId: Int); fun moveDown(entryId: Int); fun trackAction(t: Track, a: TrackMenuAction)
+}
+object PlaylistNames { const val MAX = 100; fun clean(raw: String): String? }       // trimmed, non-blank, at most 100 chars
+@HiltViewModel class PlaylistPickerViewModel @Inject constructor(playlists: PlaylistRepository) : ViewModel() {
+    val playlists: StateFlow<List<PlaylistRef>>; suspend fun addTo(playlistId: String, track: Track); suspend fun createAndAdd(name: String, track: Track): String? ; suspend fun create(name: String): String? }
+data class LocalPlaylistActions(val onBack: () -> Unit, val onPlay: (Int) -> Unit, val onShuffle: () -> Unit, val onAddToQueue: () -> Unit, val onRename: (String) -> Unit, val onDelete: () -> Unit, val onRemove: (Int) -> Unit, val onMoveUp: (Int) -> Unit, val onMoveDown: (Int) -> Unit, val onTrackMenu: (Track, TrackMenuAction) -> Unit)
+@Composable fun LocalPlaylistContent(state: LocalPlaylistUiState, actions: LocalPlaylistActions, modifier: Modifier = Modifier)
+@Composable fun NameDialog(@StringRes title: Int, initial: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit)
+@Composable fun AddToPlaylistDialog(track: Track, onDismiss: () -> Unit, viewModel: PlaylistPickerViewModel = hiltViewModel())
+tags: "playlist:row:<entryId>", "playlist:menu:<entryId>", TAG_PLAYLIST_RENAME, TAG_PLAYLIST_DELETE, TAG_NEW_PLAYLIST
+```
+
+**Acceptance Criteria:**
+- Create (Library Playlists tab "New playlist", dialog rejects blank names), rename, delete with confirmation (entries cascade; the page closes via `deleted`); "Add to playlist" appears in the track menu of Search, Library, Home, Album, Artist and Playlist rows, lists the user's playlists plus "New playlist", adds the track (songs are upserted but not added to the library) and shows "Added to <name>" before closing.
+- The local playlist page plays, shuffles and queues its tracks; rows are keyed by `entryId` (duplicates allowed); remove deletes one entry.
+- **Reorder** (CUTTABLE, third in the cut order): per-row Move up/Move down in the row menu (disabled at the ends) call `PlaylistRepository.reorder` with the full new id order, a single transactional rewrite (proven in Task 4); the view model never writes partial orders; edges and unknown ids are ignored.
+
+- [ ] **Step 1: Failing tests.**
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.playlists
+
+import androidx.lifecycle.SavedStateHandle
+import app.aria.domain.*
+import app.aria.domain.testing.*
+import app.aria.music.player.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.*
+import org.junit.After
+import org.junit.Before
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import kotlin.test.*
+
+@OptIn(ExperimentalCoroutinesApi::class)
+@RunWith(RobolectricTestRunner::class)
+class LocalPlaylistViewModelTest {
+    @Before fun setMain() = Dispatchers.setMain(UnconfinedTestDispatcher())
+    @After fun resetMain() = Dispatchers.resetMain()
+
+    private class Env(scope: kotlinx.coroutines.CoroutineScope) {
+        val repo = FakePlaylistRepository(); val engine = FakePlaybackEngine(); var id = ""
+        lateinit var vm: LocalPlaylistViewModel
+        suspend fun init(scope: kotlinx.coroutines.CoroutineScope): Env {
+            id = repo.create("Mine"); repo.addTracks(id, Samples.tracks(3))
+            vm = LocalPlaylistViewModel(SavedStateHandle(mapOf("id" to id)), repo, PlayerController(engine, ServiceLauncher { }, scope)); scope.launch { vm.state.collect { } }; return this
+        }
+        fun titles() = ((vm.state.value as LocalPlaylistUiState.Content).rows.map { it.track.title })
+        fun entry(i: Int) = (vm.state.value as LocalPlaylistUiState.Content).rows[i].entryId
+    }
+
+    @Test fun contentPlayShuffleQueue() = runTest {
+        val e = Env(backgroundScope).init(backgroundScope)
+        assertEquals(listOf("Song 1", "Song 2", "Song 3"), e.titles())
+        e.vm.play(1); e.vm.shuffle(); e.vm.addToQueue()
+        assertEquals(Samples.tracks(3) to 1, e.engine.playNowCalls[0]); assertEquals(3, e.engine.playNowCalls[1].first.size); assertEquals(1, e.engine.addedToEnd.size)
+    }
+
+    @Test fun moveUpAndDownRewriteTheWholeOrder() = runTest {
+        val e = Env(backgroundScope).init(backgroundScope)
+        e.vm.moveUp(e.entry(2)); assertEquals(listOf("Song 1", "Song 3", "Song 2"), e.titles())
+        e.vm.moveDown(e.entry(0)); assertEquals(listOf("Song 3", "Song 1", "Song 2"), e.titles())
+    }
+
+    @Test fun edgeMovesAndUnknownIdsAreIgnored() = runTest {
+        val e = Env(backgroundScope).init(backgroundScope)
+        e.vm.moveUp(e.entry(0)); e.vm.moveDown(e.entry(2)); e.vm.moveUp(9_999)
+        assertEquals(listOf("Song 1", "Song 2", "Song 3"), e.titles())
+    }
+
+    @Test fun removeRenameAndDelete() = runTest {
+        val e = Env(backgroundScope).init(backgroundScope)
+        e.vm.remove(e.entry(1)); assertEquals(listOf("Song 1", "Song 3"), e.titles())
+        e.vm.rename("  New name  "); assertEquals("New name", (e.vm.state.value as LocalPlaylistUiState.Content).playlist.title)
+        e.vm.rename("   "); assertEquals("New name", (e.vm.state.value as LocalPlaylistUiState.Content).playlist.title)
+        e.vm.delete(); assertTrue(e.vm.deleted.value); assertEquals(LocalPlaylistUiState.NotFound, e.vm.state.value)
+    }
+
+    @Test fun namesAreCleaned() {
+        assertEquals("A", PlaylistNames.clean("  A ")); assertNull(PlaylistNames.clean("   ")); assertEquals(100, PlaylistNames.clean("x".repeat(300))!!.length)
+    }
+}
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class PlaylistPickerViewModelTest {
+    @Before fun setMain() = Dispatchers.setMain(UnconfinedTestDispatcher())
+    @After fun resetMain() = Dispatchers.resetMain()
+
+    @Test fun addsToAnExistingPlaylistWithoutPuttingTheSongInTheLibrary() = runTest {
+        val repo = FakePlaylistRepository(); val id = repo.create("Mix"); val vm = PlaylistPickerViewModel(repo); backgroundScope.launch { vm.playlists.collect { } }
+        assertEquals(listOf("Mix"), vm.playlists.value.map { it.title })
+        vm.addTo(id, Samples.track(1)); assertEquals(1, repo.tracks(id).first().size)
+    }
+
+    @Test fun createAndAddRejectsBlankNames() = runTest {
+        val repo = FakePlaylistRepository(); val vm = PlaylistPickerViewModel(repo)
+        assertNull(vm.createAndAdd("  ", Samples.track(1))); val id = vm.createAndAdd(" New ", Samples.track(1))!!
+        assertEquals("New", repo.playlist(id).first()?.title); assertEquals(1, repo.tracks(id).first().size)
+    }
+}
+```
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.playlists
+
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createComposeRule
+import app.aria.domain.*
+import app.aria.domain.testing.Samples
+import app.aria.music.R
+import app.aria.music.ui.AriaTestTheme
+import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.Test
+
+class PlaylistsTest {
+    @get:Rule val rule = createComposeRule()
+    private fun str(id: Int, vararg a: Any) = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.getString(id, *a)
+    private val log = mutableListOf<String>()
+    private val actions = LocalPlaylistActions({ log += "back" }, { log += "play:$it" }, { log += "shuffle" }, { log += "queue" }, { log += "rename:$it" }, { log += "delete" }, { log += "remove:$it" }, { log += "up:$it" }, { log += "down:$it" }, { t, a -> log += "menu:${t.title}:$a" })
+    private fun rows(n: Int) = Samples.tracks(n).mapIndexed { i, t -> PlaylistTrackRow(10 + i, t) }
+    private fun content(n: Int = 3) = LocalPlaylistUiState.Content(PlaylistRef("LP1", "Mine", null, null, n), rows(n))
+    private fun show(s: LocalPlaylistUiState, pseudo: Boolean = false, fontScale: Float = 1f) { log.clear(); rule.setContent { AriaTestTheme(pseudo, fontScale) { LocalPlaylistContent(s, actions) } } }
+
+    @Test fun rowsPlayAndMenuMovesAndRemoves() {
+        show(content())
+        rule.onNodeWithText("Song 2").performClick()
+        rule.onNodeWithTag("playlist:menu:11").performClick(); rule.onNodeWithText(str(R.string.queue_move_up)).performClick()
+        rule.onNodeWithTag("playlist:menu:11").performClick(); rule.onNodeWithText(str(R.string.queue_move_down)).performClick()
+        rule.onNodeWithTag("playlist:menu:11").performClick(); rule.onNodeWithText(str(R.string.playlist_remove_track)).performClick()
+        assertEquals(listOf("play:1", "up:11", "down:11", "remove:11"), log)
+    }
+    @Test fun firstAndLastMovesAreDisabled() {
+        show(content()); rule.onNodeWithTag("playlist:menu:10").performClick(); rule.onNodeWithText(str(R.string.queue_move_up)).assertIsNotEnabled()
+    }
+    @Test fun renameDialogRejectsBlankAndConfirmsTrimmedInput() {
+        show(content()); rule.onNodeWithTag(TAG_PLAYLIST_RENAME).performClick()
+        rule.onNodeWithText(str(R.string.playlist_name_confirm)).assertIsNotEnabled()
+        rule.onNodeWithTag("name:field").performTextInput("Road trip"); rule.onNodeWithText(str(R.string.playlist_name_confirm)).performClick()
+        assertEquals(listOf("rename:Road trip"), log)
+    }
+    @Test fun deleteAsksForConfirmation() {
+        show(content()); rule.onNodeWithTag(TAG_PLAYLIST_DELETE).performClick(); assertEquals(emptyList<String>(), log)
+        rule.onNodeWithText(str(R.string.playlist_delete_confirm)).performClick(); assertEquals(listOf("delete"), log)
+    }
+    @Test fun notFoundAndErrorStates() { show(LocalPlaylistUiState.NotFound); rule.onNodeWithTag("state:empty").assertIsDisplayed() }
+    @Test fun survivesPseudolocaleAndBigFonts() { show(content(), pseudo = true, fontScale = 2f); rule.onNodeWithTag(TAG_PLAYLIST_RENAME).assertExists() }
+}
+```
+
+- [ ] **Step 2:** Push; CI fails. Expected: FAIL.
+- [ ] **Step 3: Implement.** Strings: `playlist_new` "New playlist", `playlist_name_title_new` "Name your playlist", `playlist_name_title_rename` "Rename playlist", `playlist_name_hint` "Playlist name", `playlist_name_confirm` "Save", `playlist_rename` "Rename", `playlist_delete` "Delete playlist", `playlist_delete_title` "Delete this playlist?", `playlist_delete_confirm` "Delete", `playlist_remove_track` "Remove from playlist", `playlist_not_found` "This playlist no longer exists", `track_add_to_playlist` "Add to playlist", `playlist_pick_title` "Add to playlist", `playlist_added_to` "Added to %1$s", `playlist_done` "Done". `PlaylistNames`:
+
+```kotlin
+object PlaylistNames {
+    const val MAX = 100
+    fun clean(raw: String): String? = raw.trim().take(MAX).trim().takeIf { it.isNotEmpty() }
+}
+```
+
+  `LocalPlaylistViewModel`:
+
+```kotlin
+@HiltViewModel
+class LocalPlaylistViewModel @Inject constructor(handle: SavedStateHandle, private val playlists: PlaylistRepository, private val controller: PlayerController) : ViewModel() {
+    private val id: String = checkNotNull(handle.get<String>("id"))
+    private val _deleted = MutableStateFlow(false)
+    val deleted: StateFlow<Boolean> = _deleted
+
+    val state: StateFlow<LocalPlaylistUiState> = combine(playlists.playlist(id), playlists.tracks(id)) { p, rows ->
+        if (p == null) LocalPlaylistUiState.NotFound else LocalPlaylistUiState.Content(p, rows)
+    }.catch { emit(LocalPlaylistUiState.Error) }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LocalPlaylistUiState.Loading)
+
+    private fun rows() = (state.value as? LocalPlaylistUiState.Content)?.rows.orEmpty()
+    fun play(index: Int = 0) { val r = rows(); if (r.isNotEmpty()) controller.play(r.map { it.track }, index) }
+    fun shuffle() { val r = rows(); if (r.isNotEmpty()) controller.play(r.map { it.track }.shuffled(), 0) }
+    fun addToQueue() { controller.addToQueue(rows().map { it.track }) }
+    fun rename(name: String) { val n = PlaylistNames.clean(name) ?: return; viewModelScope.launch { playlists.rename(id, n) } }
+    fun delete() { viewModelScope.launch { playlists.delete(id); _deleted.value = true } }
+    fun remove(entryId: Int) { viewModelScope.launch { playlists.removeEntry(id, entryId) } }
+    fun moveUp(entryId: Int) = move(entryId, -1)
+    fun moveDown(entryId: Int) = move(entryId, +1)
+
+    /** Computes the complete new order and rewrites it in one repository call (one transaction). */
+    private fun move(entryId: Int, delta: Int) {
+        val ids = rows().map { it.entryId }
+        val from = ids.indexOf(entryId); val to = from + delta
+        if (from < 0 || to !in ids.indices) return
+        val next = ids.toMutableList().apply { add(to, removeAt(from)) }
+        viewModelScope.launch { playlists.reorder(id, next) }
+    }
+
+    fun trackAction(t: Track, a: TrackMenuAction) {
+        when (a) { TrackMenuAction.PLAY_NEXT -> controller.playNext(t); TrackMenuAction.ADD_TO_QUEUE -> controller.addToQueue(listOf(t)); TrackMenuAction.LIKE -> Unit }
+    }
+}
+```
+
+  `PlaylistPickerViewModel`: `val playlists: StateFlow<List<PlaylistRef>> = repo.playlists("", LibrarySort.RECENTLY_ADDED).stateIn(viewModelScope, WhileSubscribed(5_000), emptyList())`; `suspend fun addTo(id, track) = repo.addTracks(id, listOf(track))`; `suspend fun create(name): String? = PlaylistNames.clean(name)?.let { repo.create(it) }`; `suspend fun createAndAdd(name, track): String? = create(name)?.also { repo.addTracks(it, listOf(track)) }`. `NameDialog`: `AlertDialog` with an `OutlinedTextField(Modifier.testTag("name:field"))` (hint `playlist_name_hint`, `singleLine`, input capped at 100 chars) and a confirm `TextButton` (`playlist_name_confirm`, `enabled = PlaylistNames.clean(text) != null`) calling `onConfirm(PlaylistNames.clean(text)!!)`. `AddToPlaylistDialog`: a `Dialog` listing `playlists` rows (`Text(title)`, 56dp clickable) plus a "New playlist" row opening `NameDialog`; choosing a playlist runs `addTo` in `rememberCoroutineScope()` and switches the dialog body to `Text(stringResource(R.string.playlist_added_to, name))` with a `Done` button; `onDismiss` otherwise. `LocalPlaylistContent`: back button, header (name, plural track count, Play/Shuffle/Queue buttons, `IconButton(TAG_PLAYLIST_RENAME)` described `playlist_rename`, `IconButton(TAG_PLAYLIST_DELETE)` described `playlist_delete` opening a confirm dialog), `LazyColumn` of keyed rows (`key = { it.entryId }`) tagged `playlist:row:<entryId>` with the overflow menu tagged `playlist:menu:<entryId>` (Play, Move up (disabled for the first), Move down (disabled for the last), Remove from playlist); `NotFound -> EmptyState(R.string.playlist_not_found)`, `Error -> ErrorState`, `Loading -> LoadingState`. `LocalPlaylistScreen` pops back when `deleted` becomes true. `AriaNavHost`: `PlaylistRoute` with `local = true` now shows `LocalPlaylistScreen(onBack = { nav.popBackStack() })` (the last `coming_soon` for playlists is gone). Library: `LibraryViewModel.createPlaylist(name: String)` via `PlaylistRepository.create(PlaylistNames.clean(name) ?: return)`; `LibraryContent` shows a `Button(TAG_NEW_PLAYLIST)` "New playlist" above the Playlists tab list opening `NameDialog`. Add-to-playlist wiring: in each of `SearchScreen`, `LibraryScreen`, `HomeScreen`, `AlbumScreen`, `ArtistScreen`, `PlaylistScreen` hold `var pending by remember { mutableStateOf<Track?>(null) }`, pass `extraActions = listOf(R.string.track_add_to_playlist to { pending = track })` to `TrackRow`, and show `pending?.let { AddToPlaylistDialog(it, onDismiss = { pending = null }) }`.
+- [ ] **Step 4 (CUTTABLE: reorder, cut order 3):** the Move up/Move down items, `moveUp`/`moveDown` and their tests are this step; if cut, delete them and the two menu items, and the repository `reorder` (already tested in Task 4) stays unused.
+- [ ] **Step 5:** Push; green on `verify`, `app-ui`. **Commit** `feat(app): playlist management with transactional reorder`. **Slice 3 complete.**
+
+---
+
+### Task 21: Settings screen
+
+Slice 4, decision 5 (UI part). The screen only edits `SettingsRepository`; applying values to the engine is the Application's job (Task 9), so nothing here touches playback.
+
+**Files:**
+- Create: `app/src/main/kotlin/app/aria/music/ui/settings/{SettingsViewModel,SettingsScreen}.kt`
+- Modify: `strings.xml`, `plurals.xml`, `ui/shell/AriaNavHost.kt` (replace the temporary `SettingsRoute`)
+- Test: `app/src/test/kotlin/app/aria/music/ui/settings/SettingsViewModelTest.kt`, `app/src/androidTest/kotlin/app/aria/music/ui/settings/SettingsTest.kt`
+
+**Interfaces:**
+- Consumes: `SettingsRepository`, `AppSettings`, `BuildConfig.VERSION_NAME`, `BuildConfig.BRAND_NAME`.
+- Produces:
+
+```kotlin
+sealed interface SettingsUiState { data object Loading : SettingsUiState; data class Content(val settings: AppSettings) : SettingsUiState }
+object SettingsChoices { val SLEEP_MINUTES = listOf(5, 10, 15, 30, 45, 60, 90); const val HISTORY_STEP_S = 5 }
+@HiltViewModel class SettingsViewModel @Inject constructor(repo: SettingsRepository) : ViewModel() {
+    val state: StateFlow<SettingsUiState>
+    fun setHistorySeconds(seconds: Int); fun setEndlessRadio(on: Boolean); fun setSkipSilence(on: Boolean); fun setNormalizeLoudness(on: Boolean); fun setSleepDefaultMinutes(minutes: Int)
+}
+data class SettingsActions(val onBack: () -> Unit, val onHistorySeconds: (Int) -> Unit, val onEndlessRadio: (Boolean) -> Unit, val onSkipSilence: (Boolean) -> Unit, val onNormalize: (Boolean) -> Unit, val onSleepDefault: (Int) -> Unit)
+@Composable fun SettingsContent(state: SettingsUiState, versionName: String, brandName: String, actions: SettingsActions, modifier: Modifier = Modifier)
+@Composable fun SettingsScreen(onBack: () -> Unit, viewModel: SettingsViewModel = hiltViewModel())
+tags: TAG_SETTINGS_HISTORY, TAG_SETTINGS_RADIO, TAG_SETTINGS_SILENCE, TAG_SETTINGS_LOUDNESS, TAG_SETTINGS_SLEEP, TAG_SETTINGS_ABOUT
+```
+
+**Acceptance Criteria:**
+- Settings: history threshold (slider 10-120 s in 5 s steps, value shown with a plural, state description), endless radio, skip silence, loudness normalization (switches with the label as the accessible name), default sleep timer (menu of 5, 10, 15, 30, 45, 60, 90 minutes). Every change is persisted through the repository and clamped by `AppSettings.normalized()`.
+- About section: app name, version, the non-affiliation notice ("not affiliated with, endorsed by, or sponsored by Google, YouTube or YouTube Music"), and "No analytics. Nothing is sent to the Aria project." This closes the release-gate line about the About screen notice.
+- Rows are at least 48dp; layout survives font scale 2.0 and `en-XA`; a `Loading` state exists.
+
+- [ ] **Step 1: Failing tests.**
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.settings
+
+import app.aria.domain.AppSettings
+import app.aria.domain.testing.FakeSettingsRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.*
+import kotlin.test.*
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class SettingsViewModelTest {
+    @BeforeTest fun setMain() = Dispatchers.setMain(UnconfinedTestDispatcher())
+    @AfterTest fun resetMain() = Dispatchers.resetMain()
+
+    private fun TestScope.env(): Pair<FakeSettingsRepository, SettingsViewModel> {
+        val repo = FakeSettingsRepository(); val vm = SettingsViewModel(repo); backgroundScope.launch { vm.state.collect { } }; return repo to vm
+    }
+
+    @Test fun showsStoredValues() = runTest {
+        val repo = FakeSettingsRepository(AppSettings(historyThresholdMs = 60_000, skipSilence = true)); val vm = SettingsViewModel(repo); backgroundScope.launch { vm.state.collect { } }
+        val c = vm.state.value as SettingsUiState.Content; assertEquals(60_000L, c.settings.historyThresholdMs); assertTrue(c.settings.skipSilence)
+    }
+
+    @Test fun everyChangeIsPersisted() = runTest {
+        val (repo, vm) = env()
+        vm.setHistorySeconds(45); vm.setEndlessRadio(false); vm.setSkipSilence(true); vm.setNormalizeLoudness(false); vm.setSleepDefaultMinutes(30)
+        assertEquals(AppSettings(historyThresholdMs = 45_000, endlessRadio = false, skipSilence = true, normalizeLoudness = false, sleepTimerDefaultMinutes = 30), repo.current)
+    }
+
+    @Test fun historyIsClampedToTenThroughOneTwentySeconds() = runTest {
+        val (repo, vm) = env()
+        vm.setHistorySeconds(1); assertEquals(10_000L, repo.current.historyThresholdMs)
+        vm.setHistorySeconds(9_999); assertEquals(120_000L, repo.current.historyThresholdMs)
+    }
+
+    @Test fun onboardingFlagIsNotTouchedBySettingsChanges() = runTest {
+        val repo = FakeSettingsRepository(AppSettings(onboardingDone = true)); val vm = SettingsViewModel(repo); vm.setEndlessRadio(false)
+        assertTrue(repo.current.onboardingDone)
+    }
+}
+```
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.settings
+
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.unit.dp
+import app.aria.domain.AppSettings
+import app.aria.music.R
+import app.aria.music.ui.AriaTestTheme
+import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.Test
+
+class SettingsTest {
+    @get:Rule val rule = createComposeRule()
+    private fun str(id: Int, vararg a: Any) = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.getString(id, *a)
+    private val log = mutableListOf<String>()
+    private val actions = SettingsActions({ log += "back" }, { log += "history:$it" }, { log += "radio:$it" }, { log += "silence:$it" }, { log += "loudness:$it" }, { log += "sleep:$it" })
+    private fun show(s: SettingsUiState = SettingsUiState.Content(AppSettings()), pseudo: Boolean = false, fontScale: Float = 1f) {
+        log.clear(); rule.setContent { AriaTestTheme(pseudo, fontScale) { SettingsContent(s, "0.1.0", "Aria", actions) } }
+    }
+
+    @Test fun switchesReflectStateAndInvokeActions() {
+        show()
+        rule.onNodeWithTag(TAG_SETTINGS_RADIO).assertIsOn().performClick()
+        rule.onNodeWithTag(TAG_SETTINGS_SILENCE).assertIsOff().performClick()
+        rule.onNodeWithTag(TAG_SETTINGS_LOUDNESS).assertIsOn().performClick()
+        assertEquals(listOf("radio:false", "silence:true", "loudness:false"), log)
+    }
+    @Test fun rowsAreAtLeast48dp() {
+        show(); for (t in listOf(TAG_SETTINGS_RADIO, TAG_SETTINGS_SILENCE, TAG_SETTINGS_LOUDNESS, TAG_SETTINGS_SLEEP)) rule.onNodeWithTag(t).assertHeightIsAtLeast(48.dp)
+    }
+    @Test fun historySliderDescribesItsValue() {
+        show(); rule.onNodeWithTag(TAG_SETTINGS_HISTORY).assert(SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.StateDescription))
+        rule.onNodeWithText(str(R.string.settings_history_title)).assertExists()
+    }
+    @Test fun sleepDefaultMenuOffersTheChoices() {
+        show(); rule.onNodeWithTag(TAG_SETTINGS_SLEEP).performClick(); rule.onNodeWithText(str(R.string.np_sleep_in_minutes, 45)).performClick(); assertEquals(listOf("sleep:45"), log)
+    }
+    @Test fun aboutShowsNonAffiliationAndNoAnalytics() {
+        show(); rule.onNodeWithTag(TAG_SETTINGS_ABOUT).performScrollTo()
+        rule.onNodeWithText(str(R.string.settings_about_non_affiliation)).assertExists(); rule.onNodeWithText(str(R.string.settings_about_no_analytics)).assertExists(); rule.onNodeWithText(str(R.string.settings_version, "0.1.0")).assertExists()
+    }
+    @Test fun loadingState() { show(SettingsUiState.Loading); rule.onNodeWithTag("state:loading").assertIsDisplayed() }
+    @Test fun survivesPseudolocaleAndBigFonts() { show(pseudo = true, fontScale = 2f); rule.onNodeWithTag(TAG_SETTINGS_RADIO).assertExists() }
+}
+```
+
+- [ ] **Step 2:** Push; CI fails. Expected: FAIL.
+- [ ] **Step 3: Implement.** Strings: `settings_title` "Settings", `settings_playback` "Playback", `settings_history_title` "Count a play after", `settings_radio` "Endless radio", `settings_radio_body` "Add related songs when the queue runs low", `settings_silence` "Skip silence", `settings_loudness` "Normalize loudness", `settings_sleep_default` "Default sleep timer", `settings_about` "About", `settings_version` "Version %1$s", `settings_about_non_affiliation` "%1$s is an independent project. It is not affiliated with, endorsed by, or sponsored by Google, YouTube or YouTube Music.", `settings_about_no_analytics` "No analytics. Nothing is sent to the Aria project."; plural `<plurals name="settings_history_value"><item quantity="one">%1$d second</item><item quantity="other">%1$d seconds</item></plurals>`. (The non-affiliation string takes the brand name as `%1$s`; update the test's `str(R.string.settings_about_non_affiliation)` call to pass `"Aria"`.) ViewModel:
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.settings
+
+@HiltViewModel
+class SettingsViewModel @Inject constructor(private val repo: SettingsRepository) : ViewModel() {
+    val state: StateFlow<SettingsUiState> = repo.settings.map<AppSettings, SettingsUiState> { SettingsUiState.Content(it) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SettingsUiState.Loading)
+
+    private fun edit(f: (AppSettings) -> AppSettings) { viewModelScope.launch { repo.update(f) } }
+    fun setHistorySeconds(seconds: Int) = edit { it.copy(historyThresholdMs = seconds * 1_000L) }
+    fun setEndlessRadio(on: Boolean) = edit { it.copy(endlessRadio = on) }
+    fun setSkipSilence(on: Boolean) = edit { it.copy(skipSilence = on) }
+    fun setNormalizeLoudness(on: Boolean) = edit { it.copy(normalizeLoudness = on) }
+    fun setSleepDefaultMinutes(minutes: Int) = edit { it.copy(sleepTimerDefaultMinutes = minutes) }
+}
+```
+
+  `SettingsScreen.kt`: `SettingsContent` = scrollable `Column` with a top row (back `IconButton` 48dp, title) then: `SwitchRow(tag, @StringRes label, @StringRes body?, checked, onChange)` = `Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).toggleable(value = checked, role = Role.Switch, onValueChange = onChange).testTag(tag)) { Column(Modifier.weight(1f)) { Text(label); body?.let { Text(it) } }; Switch(checked = checked, onCheckedChange = null) }` (the row is the single accessible switch); the history `Column(Modifier.testTag(TAG_SETTINGS_HISTORY))` holds the label, a `Slider(value = seconds.toFloat(), onValueChange = { raw -> onHistorySeconds(((raw / 5).roundToInt() * 5)) }, valueRange = 10f..120f, steps = 21)` whose `semantics { stateDescription = pluralStringResource(R.plurals.settings_history_value, seconds, seconds) }` and a text of the same value; the sleep row `Row(Modifier.heightIn(min = 56.dp).clickable { open = true }.testTag(TAG_SETTINGS_SLEEP))` with a `DropdownMenu` of `SettingsChoices.SLEEP_MINUTES` items showing `stringResource(R.string.np_sleep_in_minutes, m)`; the About column tagged `TAG_SETTINGS_ABOUT` (name `brandName`, `settings_version`, `settings_about_non_affiliation` with `brandName`, `settings_about_no_analytics`). `Loading -> LoadingState()`. `SettingsScreen` passes `BuildConfig.VERSION_NAME` and `BuildConfig.BRAND_NAME` (`BuildConfig` is generated because `buildFeatures.buildConfig = true`). `AriaNavHost`: `composable<SettingsRoute> { SettingsScreen(onBack = { nav.popBackStack() }) }`.
+- [ ] **Step 4:** Push; green. **Commit** `feat(app): settings screen`.
+
+---
+
+### Task 22: First-run onboarding (with the notification permission offered)
+
+Slice 4. The permission rationale at the moment of first playback (Task 12) stays as the fallback; onboarding adds an optional up-front request.
+
+**Files:**
+- Create: `app/src/main/kotlin/app/aria/music/ui/onboarding/{OnboardingViewModel,OnboardingScreen}.kt`, `app/src/main/kotlin/app/aria/music/ui/shell/ShellViewModel.kt`
+- Modify: `app/src/main/kotlin/app/aria/music/ui/shell/AriaNavHost.kt` (root start destination and `ShellViewModel` move), `strings.xml`
+- Test: `app/src/test/kotlin/app/aria/music/ui/{shell/ShellViewModelTest,onboarding/OnboardingViewModelTest}.kt`, `app/src/androidTest/kotlin/app/aria/music/ui/onboarding/OnboardingTest.kt`
+
+**Interfaces:**
+- Consumes: `SettingsRepository` (`onboardingDone`), `NotificationPermissionPolicy`.
+- Produces:
+
+```kotlin
+@HiltViewModel class ShellViewModel @Inject constructor(val controller: PlayerController, settings: SettingsRepository) : ViewModel() { val onboardingDone: StateFlow<Boolean?> }   // null until the first read
+@HiltViewModel class OnboardingViewModel @Inject constructor(settings: SettingsRepository) : ViewModel() { fun finish() }
+enum class OnboardingPage { WELCOME, PRIVACY, NOTIFICATIONS }
+data class OnboardingActions(val onFinish: () -> Unit, val onRequestNotifications: () -> Unit)
+@Composable fun OnboardingContent(showNotificationPage: Boolean, actions: OnboardingActions, modifier: Modifier = Modifier)
+@Composable fun OnboardingScreen(onDone: () -> Unit, viewModel: OnboardingViewModel = hiltViewModel())
+tags: TAG_ONBOARDING_NEXT, TAG_ONBOARDING_BACK, TAG_ONBOARDING_SKIP, TAG_ONBOARDING_FINISH, TAG_ONBOARDING_NOTIFY, TAG_ONBOARDING_PAGE
+```
+
+**Acceptance Criteria:**
+- On first run (`onboardingDone == false`) the app opens `OnboardingRoute`; afterwards `HomeRoute`; while the flag is still loading nothing but an empty surface is shown (no flash of Home). Finishing (or skipping) stores `onboardingDone = true` and navigates to Home, clearing onboarding from the back stack.
+- Three pages: Welcome (what the app does; that music comes from YouTube Music), Privacy (local library and playlists, no account, no analytics, the YouTube and image-CDN requests listed in plain words, non-affiliation), Notifications (API 33+ and permission missing only: explains why, "Allow notifications" button, never required). The permission is never requested without a tap.
+- Next, Back, Skip and Get started are 48dp+, labelled from resources; the page counter is announced ("Page 2 of 3").
+
+- [ ] **Step 1: Failing tests.**
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.shell
+
+import app.aria.domain.AppSettings
+import app.aria.domain.testing.*
+import app.aria.music.player.PlayerController
+import app.aria.music.player.ServiceLauncher
+import app.aria.music.ui.onboarding.OnboardingViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.*
+import kotlin.test.*
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class ShellViewModelTest {
+    @BeforeTest fun setMain() = Dispatchers.setMain(UnconfinedTestDispatcher())
+    @AfterTest fun resetMain() = Dispatchers.resetMain()
+
+    @Test fun nullUntilTheFlagIsRead() = runTest {
+        val vm = ShellViewModel(PlayerController(FakePlaybackEngine(), ServiceLauncher { }, backgroundScope), FakeSettingsRepository())
+        assertNull(vm.onboardingDone.value)
+        backgroundScope.launch { vm.onboardingDone.collect { } }
+        assertEquals(false, vm.onboardingDone.value)
+    }
+
+    @Test fun reflectsTheStoredFlag() = runTest {
+        val vm = ShellViewModel(PlayerController(FakePlaybackEngine(), ServiceLauncher { }, backgroundScope), FakeSettingsRepository(AppSettings(onboardingDone = true)))
+        backgroundScope.launch { vm.onboardingDone.collect { } }; assertEquals(true, vm.onboardingDone.value)
+    }
+
+    @Test fun finishingOnboardingStoresTheFlagAndKeepsOtherSettings() = runTest {
+        val repo = FakeSettingsRepository(AppSettings(endlessRadio = false)); OnboardingViewModel(repo).finish()
+        assertTrue(repo.current.onboardingDone); assertFalse(repo.current.endlessRadio)
+    }
+}
+```
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.onboarding
+
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.unit.dp
+import app.aria.music.R
+import app.aria.music.ui.AriaTestTheme
+import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.Test
+
+class OnboardingTest {
+    @get:Rule val rule = createComposeRule()
+    private fun str(id: Int, vararg a: Any) = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.getString(id, *a)
+    private val log = mutableListOf<String>()
+    private val actions = OnboardingActions({ log += "finish" }, { log += "notify" })
+    private fun show(notify: Boolean = true, pseudo: Boolean = false, fontScale: Float = 1f) { log.clear(); rule.setContent { AriaTestTheme(pseudo, fontScale) { OnboardingContent(notify, actions) } } }
+
+    @Test fun walksThroughThreePagesAndFinishes() {
+        show()
+        rule.onNodeWithText(str(R.string.onboarding_welcome_title)).assertIsDisplayed(); rule.onNodeWithTag(TAG_ONBOARDING_NEXT).assertHeightIsAtLeast(48.dp).performClick()
+        rule.onNodeWithText(str(R.string.onboarding_privacy_title)).assertIsDisplayed(); rule.onNodeWithTag(TAG_ONBOARDING_NEXT).performClick()
+        rule.onNodeWithText(str(R.string.onboarding_notifications_title)).assertIsDisplayed(); rule.onNodeWithTag(TAG_ONBOARDING_FINISH).performClick()
+        assertEquals(listOf("finish"), log)
+    }
+    @Test fun backReturnsToThePreviousPage() {
+        show(); rule.onNodeWithTag(TAG_ONBOARDING_NEXT).performClick(); rule.onNodeWithTag(TAG_ONBOARDING_BACK).performClick(); rule.onNodeWithText(str(R.string.onboarding_welcome_title)).assertIsDisplayed()
+    }
+    @Test fun skipFinishesImmediately() { show(); rule.onNodeWithTag(TAG_ONBOARDING_SKIP).performClick(); assertEquals(listOf("finish"), log) }
+    @Test fun notificationButtonOnlyRequestsOnTap() {
+        show(); rule.onNodeWithTag(TAG_ONBOARDING_NEXT).performClick(); rule.onNodeWithTag(TAG_ONBOARDING_NEXT).performClick()
+        assertEquals(emptyList<String>(), log); rule.onNodeWithTag(TAG_ONBOARDING_NOTIFY).performClick(); assertEquals(listOf("notify"), log)
+    }
+    @Test fun withoutTheNotificationPageThePrivacyPageFinishes() {
+        show(notify = false); rule.onNodeWithTag(TAG_ONBOARDING_NEXT).performClick(); rule.onNodeWithTag(TAG_ONBOARDING_FINISH).assertIsDisplayed(); rule.onNodeWithText(str(R.string.onboarding_notifications_title)).assertDoesNotExist()
+    }
+    @Test fun pageCounterIsAnnounced() { show(); rule.onNodeWithTag(TAG_ONBOARDING_PAGE).assertContentDescriptionContains(str(R.string.onboarding_page_of, 1, 3)) }
+    @Test fun survivesPseudolocaleAndBigFonts() { show(pseudo = true, fontScale = 2f); rule.onNodeWithTag(TAG_ONBOARDING_NEXT).assertExists() }
+}
+```
+
+- [ ] **Step 2:** Push; CI fails. Expected: FAIL.
+- [ ] **Step 3: Implement.** Strings: `onboarding_welcome_title` "Welcome", `onboarding_welcome_body` "Search and play music from YouTube Music, keep a library and playlists on your phone, and control playback from the notification and lock screen.", `onboarding_privacy_title` "Your data stays here", `onboarding_privacy_body` "Your library, playlists and history stay on this device. There is no account and no analytics. Searching and playing contact YouTube Music, and artwork loads from Google's image servers, so Google sees your IP address. %1$s is not affiliated with Google or YouTube.", `onboarding_notifications_title` "Playback controls", `onboarding_notifications_body` "Allow notifications to control music from the notification shade and the lock screen. Music plays either way.", `onboarding_notify_allow` "Allow notifications", `onboarding_next` "Next", `onboarding_back` "Back", `onboarding_skip` "Skip", `onboarding_finish` "Get started", `onboarding_page_of` "Page %1$d of %2$d". `ShellViewModel.kt` (moved out of `AriaNavHost.kt`):
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.shell
+
+@HiltViewModel
+class ShellViewModel @Inject constructor(val controller: PlayerController, settings: SettingsRepository) : ViewModel() {
+    val onboardingDone: StateFlow<Boolean?> = settings.settings.map<AppSettings, Boolean?> { it.onboardingDone }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), null)
+}
+```
+
+```kotlin
+@HiltViewModel
+class OnboardingViewModel @Inject constructor(private val settings: SettingsRepository) : ViewModel() {
+    fun finish() { viewModelScope.launch { settings.update { it.copy(onboardingDone = true) } } }
+}
+```
+
+  `AriaRoot` becomes `fun AriaRoot(shell: ShellViewModel = hiltViewModel())`: `val done by shell.onboardingDone.collectAsStateWithLifecycle(); if (done == null) { Box(Modifier.fillMaxSize()); return }` before building the scaffold, passes `start = if (done == true) HomeRoute else OnboardingRoute` to `AriaNavHost(nav, start, modifier)` (`NavHost(nav, startDestination = start, ...)`), and `composable<OnboardingRoute> { OnboardingScreen(onDone = { nav.navigate(HomeRoute) { popUpTo<OnboardingRoute> { inclusive = true } } }) }`. `OnboardingContent`: `var index by rememberSaveable { mutableIntStateOf(0) }`; `val pages = listOfNotNull(WELCOME, PRIVACY, NOTIFICATIONS.takeIf { showNotificationPage })`; a `Column` with a `Text` (tag `TAG_ONBOARDING_PAGE`, `semantics { contentDescription = stringResource(R.string.onboarding_page_of, index + 1, pages.size) }`) and the page body (title `headlineSmall`, body text; the Privacy body gets `stringResource(R.string.onboarding_privacy_body, stringResource(R.string.app_name))`; the Notifications page adds `Button(TAG_ONBOARDING_NOTIFY, Modifier.heightIn(min = 48.dp), onClick = actions.onRequestNotifications) { Text(onboarding_notify_allow) }`); a bottom row with `TextButton(TAG_ONBOARDING_SKIP)`, `TextButton(TAG_ONBOARDING_BACK)` (hidden on page 0), and `Button(TAG_ONBOARDING_NEXT)` or, on the last page, `Button(TAG_ONBOARDING_FINISH)` calling `actions.onFinish` (all `heightIn(min = 48.dp)`). `OnboardingScreen` computes `showNotificationPage = NotificationPermissionPolicy.shouldExplain(Build.VERSION.SDK_INT, granted, alreadyAsked = false, hasQueue = true)` with the same `checkSelfPermission` as Task 12, launches `ActivityResultContracts.RequestPermission` for `onRequestNotifications`, and calls `viewModel.finish()` then `onDone()` for `onFinish`.
+- [ ] **Step 4 (CUTTABLE: onboarding polish, cut order 4):** swap the `index` state for a `HorizontalPager` (swipe between pages, the buttons still work) with an animated dot indicator (decorative, `clearAndSetSemantics {}`; the announced page counter stays), and add a simple vector illustration above each title. If cut, the three text pages above are the shipped onboarding; everything in Acceptance Criteria still holds.
+- [ ] **Step 5:** Push; green on `verify`, `app-ui`, `playback-service`. **Commit** `feat(app): first-run onboarding`. **Slice 4 complete.**
+
+---
+
+### Task 23: Apple-style Now Playing skin (first to cut)
+
+Slice 5, cut order 1. Same `NowPlayingUiState` and `NowPlayingActions`; a second composable chosen by a persisted setting.
+
+**Files:**
+- Create: `app/src/main/kotlin/app/aria/music/ui/nowplaying/{AppleNowPlaying,NowPlayingParts}.kt`
+- Modify: `domain/src/main/kotlin/app/aria/domain/Settings.kt`, `data/src/main/kotlin/app/aria/data/DataStoreSettingsRepository.kt`, `ui/nowplaying/{MaterialNowPlaying,NowPlayingViewModel,NowPlayingScreen}.kt`, `ui/settings/{SettingsViewModel,SettingsScreen}.kt`, `strings.xml`
+- Test: `data/src/test/.../DataStoreSettingsRepositoryTest.kt` (add a case), `app/src/test/.../NowPlayingViewModelTest.kt` and `SettingsViewModelTest.kt` (add cases), `app/src/androidTest/kotlin/app/aria/music/ui/nowplaying/NowPlayingSkinContractTest.kt`, `SettingsTest.kt` (add a case)
+
+**Interfaces:**
+- Consumes: `NowPlayingUiState`, `NowPlayingActions`, `SettingsRepository`, `GlassSurface`.
+- Produces:
+
+```kotlin
+enum class NowPlayingSkin { MATERIAL, APPLE }                                // :domain
+data class AppSettings(..., val nowPlayingSkin: NowPlayingSkin = NowPlayingSkin.MATERIAL)   // new last property
+NowPlayingViewModel.skin: StateFlow<NowPlayingSkin>
+SettingsViewModel.setNowPlayingSkin(skin: NowPlayingSkin); SettingsActions.onSkin: (NowPlayingSkin) -> Unit  // new last property
+@Composable fun AppleNowPlayingContent(state: NowPlayingUiState, positionMs: () -> Long, actions: NowPlayingActions, modifier: Modifier = Modifier)
+internal @Composable fun NowPlayingBanners(status: PlayerStatus, onRetry: () -> Unit); internal fun SeekBar(positionMs: () -> Long, durationMs: Long, onSeek: (Long) -> Unit); internal fun SleepMenu(state: NowPlayingUiState.Content, actions: NowPlayingActions)
+tags: TAG_SETTINGS_SKIN
+```
+
+**Acceptance Criteria:**
+- Both skins satisfy one contract test (same tags, descriptions, 48dp targets, callbacks, offline and error banners, empty state) run parameterized over `NowPlayingContent` and `AppleNowPlayingContent`, at font scale 2.0 and under `en-XA`.
+- The Apple skin: large rounded artwork with a shadow, centered title and artists, the seek bar and a centered round play button inside a `GlassSurface` panel (fallback on API 26-30), secondary controls below; it adds no behaviour.
+- The setting persists (DataStore key `now_playing_skin`, unknown stored values fall back to `MATERIAL`), Settings has a two-option selector (radio semantics), and `NowPlayingScreen` renders the chosen skin. Cutting this task removes only the files above; nothing earlier depends on it.
+
+- [ ] **Step 1: Failing tests.** Data and view model cases:
+
+```kotlin
+    // DataStoreSettingsRepositoryTest: add
+    @Test fun skinPersistsAndUnknownValuesFallBack() = runBlocking {
+        val file = tmp.newFile("e.preferences_pb").also { it.delete() }
+        val s1 = CoroutineScope(Job() + Dispatchers.IO)
+        open(file, s1).update { it.copy(nowPlayingSkin = NowPlayingSkin.APPLE) }
+        s1.cancel(); s1.coroutineContext[Job]!!.join()
+        val s2 = CoroutineScope(Job() + Dispatchers.IO)
+        assertEquals(NowPlayingSkin.APPLE, open(file, s2).settings.first().nowPlayingSkin)
+        s2.cancel()
+    }
+```
+
+```kotlin
+    // SettingsViewModelTest: add
+    @Test fun skinIsPersisted() = runTest { val (repo, vm) = env(); vm.setNowPlayingSkin(NowPlayingSkin.APPLE); assertEquals(NowPlayingSkin.APPLE, repo.current.nowPlayingSkin) }
+    // NowPlayingViewModelTest: add (uses Env.settings)
+    @Test fun skinFollowsTheSetting() = runTest {
+        val e = Env(backgroundScope); backgroundScope.launch { e.vm.skin.collect { } }
+        assertEquals(NowPlayingSkin.MATERIAL, e.vm.skin.value); e.settings.update { it.copy(nowPlayingSkin = NowPlayingSkin.APPLE) }; assertEquals(NowPlayingSkin.APPLE, e.vm.skin.value)
+    }
+```
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.nowplaying
+
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.unit.dp
+import app.aria.domain.*
+import app.aria.music.R
+import app.aria.music.player.PlayerStatus
+import app.aria.music.ui.AriaTestTheme
+import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.junit.runners.Parameterized
+
+typealias Skin = @Composable (NowPlayingUiState, () -> Long, NowPlayingActions, Modifier) -> Unit
+
+@RunWith(Parameterized::class)
+class NowPlayingSkinContractTest(private val name: String, private val skin: Skin) {
+    companion object {
+        @JvmStatic @Parameterized.Parameters(name = "{0}")
+        fun skins(): List<Array<Any>> = listOf(
+            arrayOf("material", { s: NowPlayingUiState, p: () -> Long, a: NowPlayingActions, m: Modifier -> NowPlayingContent(s, p, a, m) } as Skin),
+            arrayOf("apple", { s: NowPlayingUiState, p: () -> Long, a: NowPlayingActions, m: Modifier -> AppleNowPlayingContent(s, p, a, m) } as Skin),
+        )
+    }
+
+    @get:Rule val rule = createComposeRule()
+    private fun str(id: Int, vararg a: Any) = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.getString(id, *a)
+    private val track = Track(TrackId.youtube("dQw4w9WgXcQ"), "Title", listOf("Artist"), 200_000, null)
+    private fun content(status: PlayerStatus = PlayerStatus.PAUSED, liked: Boolean = false) = NowPlayingUiState.Content(track, status, 200_000, false, RepeatMode.OFF, null, liked, 3, 0, 15)
+    private val log = mutableListOf<String>()
+    private val actions = NowPlayingActions({ log += "back" }, { log += "toggle" }, { log += "next" }, { log += "previous" }, { log += "seek:$it" }, { log += "shuffle:$it" }, { log += "repeat" }, { log += "like" }, { log += "sleep:$it" }, { log += "sleepEnd" }, { log += "sleepOff" }, { log += "queue" })
+    private fun show(s: NowPlayingUiState, pseudo: Boolean = false, fontScale: Float = 1f) { log.clear(); rule.setContent { AriaTestTheme(pseudo, fontScale) { skin(s, { 65_000L }, actions, Modifier) } } }
+
+    @Test fun controlsAreDescribedAndBigEnough() {
+        show(content())
+        for (id in listOf(R.string.action_play, R.string.action_next, R.string.action_previous, R.string.np_like, R.string.np_queue, R.string.np_shuffle_off, R.string.np_repeat_off))
+            rule.onNodeWithContentDescription(str(id)).assertIsDisplayed().assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp)
+    }
+    @Test fun callbacksFire() {
+        show(content()); rule.onNodeWithTag(TAG_NP_PLAY).performClick(); rule.onNodeWithTag(TAG_NP_LIKE).performClick(); rule.onNodeWithTag(TAG_NP_QUEUE).performClick()
+        assertEquals(listOf("toggle", "like", "queue"), log)
+    }
+    @Test fun bannersAndEmptyState() { show(content(PlayerStatus.WAITING_FOR_NETWORK)); rule.onNodeWithTag(TAG_NP_OFFLINE).assertIsDisplayed() }
+    @Test fun errorBannerOffersRetry() { show(content(PlayerStatus.ERROR)); rule.onNodeWithText(str(R.string.retry)).performClick(); assertEquals(listOf("toggle"), log) }
+    @Test fun emptyState() { show(NowPlayingUiState.Empty); rule.onNodeWithContentDescription(str(R.string.back)).performClick(); assertEquals(listOf("back"), log) }
+    @Test fun seekBarAndLyricsSlot() { show(content()); rule.onNodeWithTag(TAG_NP_SEEK).assertExists(); rule.onNodeWithTag(TAG_NP_LYRICS).assertExists() }
+    @Test fun survivesPseudolocaleAndBigFonts() { show(content(PlayerStatus.PLAYING), pseudo = true, fontScale = 2f); rule.onNodeWithTag(TAG_NP_PLAY).assertIsDisplayed() }
+}
+```
+
+  (In `SettingsTest` add `@Test fun skinSelectorOffersBothStyles()` that taps `str(R.string.settings_skin_apple)` and expects the action log `skin:APPLE`; `SettingsActions` gains `onSkin` as its last parameter, so the existing test's `actions` gets `{ log += "skin:$it" }` appended.)
+- [ ] **Step 2:** Push; CI fails. Expected: FAIL.
+- [ ] **Step 3: Implement.** `Settings.kt`: add `enum class NowPlayingSkin { MATERIAL, APPLE }` and `val nowPlayingSkin: NowPlayingSkin = NowPlayingSkin.MATERIAL` as the last `AppSettings` property. `DataStoreSettingsRepository`: `val nowPlayingSkin = stringPreferencesKey("now_playing_skin")` (import `stringPreferencesKey`); write `p[Keys.nowPlayingSkin] = next.nowPlayingSkin.name`; read `NowPlayingSkin.entries.firstOrNull { it.name == this[Keys.nowPlayingSkin] } ?: d.nowPlayingSkin`. `NowPlayingViewModel`: `val skin: StateFlow<NowPlayingSkin> = settings.settings.map { it.nowPlayingSkin }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NowPlayingSkin.MATERIAL)` (keep `settings` as a constructor property: `private val settings: SettingsRepository`, used by both flows). Refactor `MaterialNowPlaying.kt`: move the banners (offline and error with Retry), `SeekBar` (make it `internal`) and the sleep menu into `NowPlayingParts.kt` as `NowPlayingBanners`, `SeekBar`, `SleepMenu` and call them from the Material skin; the Task 14 tests must stay green. `AppleNowPlaying.kt`:
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.nowplaying
+
+@Composable
+fun AppleNowPlayingContent(state: NowPlayingUiState, positionMs: () -> Long, actions: NowPlayingActions, modifier: Modifier = Modifier) {
+    when (state) {
+        NowPlayingUiState.Empty -> NowPlayingEmpty(actions.onBack, modifier)
+        is NowPlayingUiState.Content -> Column(modifier.verticalScroll(rememberScrollState()).padding(horizontal = 28.dp, vertical = 16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                IconButton(onClick = actions.onBack, modifier = Modifier.size(48.dp)) { Icon(AriaIcons.ExpandMore, contentDescription = stringResource(R.string.back)) }
+                IconButton(onClick = actions.onOpenQueue, modifier = Modifier.size(48.dp).testTag(TAG_NP_QUEUE)) { Icon(AriaIcons.QueueMusic, contentDescription = stringResource(R.string.np_queue)) }
+            }
+            AriaImage(state.track.thumbnailUrl, null, Modifier.fillMaxWidth(0.86f).aspectRatio(1f).shadow(24.dp, RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp)))
+            Spacer(Modifier.height(24.dp))
+            Text(state.track.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center, maxLines = 2)
+            Text(state.track.artists.joinToString(stringResource(R.string.artist_separator)), style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center, maxLines = 1)
+            NowPlayingBanners(state.status, actions.onToggle)
+            GlassSurface(Modifier.fillMaxWidth().padding(top = 16.dp), shape = RoundedCornerShape(32.dp)) {
+                Column(Modifier.padding(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    SeekBar(positionMs, state.durationMs, actions.onSeek)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                        IconButton(onClick = actions.onPrevious, modifier = Modifier.size(56.dp)) { Icon(AriaIcons.SkipPrevious, stringResource(R.string.action_previous), Modifier.size(32.dp)) }
+                        FilledIconButton(onClick = actions.onToggle, modifier = Modifier.size(72.dp).testTag(TAG_NP_PLAY)) {
+                            val playing = state.status == PlayerStatus.PLAYING || state.status == PlayerStatus.BUFFERING
+                            Icon(if (playing) AriaIcons.Pause else AriaIcons.PlayArrow, stringResource(if (playing) R.string.action_pause else R.string.action_play), Modifier.size(36.dp))
+                        }
+                        IconButton(onClick = actions.onNext, modifier = Modifier.size(56.dp)) { Icon(AriaIcons.SkipNext, stringResource(R.string.action_next), Modifier.size(32.dp)) }
+                    }
+                }
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+                SecondaryControls(state, actions)      // shuffle, repeat, like (TAG_NP_LIKE), SleepMenu (TAG_NP_SLEEP): moved to NowPlayingParts.kt and shared with the Material skin
+            }
+            LyricsSlot(Modifier.testTag(TAG_NP_LYRICS))
+        }
+    }
+}
+```
+
+  (`NowPlayingEmpty(onBack, modifier)` and `SecondaryControls(state, actions)` are the empty-state column and the mode row extracted from `MaterialNowPlaying.kt` into `NowPlayingParts.kt` in the same refactor, so both skins share them.) `NowPlayingScreen`: `val skin by viewModel.skin.collectAsStateWithLifecycle()` and `when (skin) { MATERIAL -> NowPlayingContent(...); APPLE -> AppleNowPlayingContent(...) }`. Settings: `SettingsViewModel.setNowPlayingSkin(skin) = edit { it.copy(nowPlayingSkin = skin) }`; `SettingsActions` gains `val onSkin: (NowPlayingSkin) -> Unit` last; `SettingsContent` adds a "Now Playing style" group (`Column(Modifier.selectableGroup().testTag(TAG_SETTINGS_SKIN))` with two `Row(Modifier.selectable(selected, role = Role.RadioButton, onClick).heightIn(min = 48.dp)) { RadioButton(selected, onClick = null); Text(label) }`); strings `settings_skin_title` "Now Playing style", `settings_skin_material` "Material", `settings_skin_apple` "Apple-style".
+- [ ] **Step 4:** Push; green on `verify` (data, app unit tests) and `app-ui` (contract test on both skins, API 26 and 34). **Commit** `feat(app): Apple-style Now Playing skin and style setting`. **Slice 5 complete.**
+
+---
+
+### Task 24: Final checks, documentation and review
+
+Definition of done (spec section 7). No new features.
+
+**Files:**
+- Create: `app/src/androidTest/kotlin/app/aria/music/ui/PseudoLocaleMatrixTest.kt`
+- Modify: `docs/data-flow.md`, `PRIVACY.md`, `README.md`, `CONTRIBUTING.md`, `docs/manual-device-checklist.md`, `docs/release-gates.md`, `docs/providers/youtube-music.md`, `docs/provenance.csv` (the `app` row text), `app/src/main/res/values/strings.xml` (remove `coming_soon`), `scripts/ui-strings-baseline.txt` (must be comment-only)
+
+**Interfaces:** none new.
+
+**Acceptance Criteria:**
+- `PseudoLocaleMatrixTest` renders every screen's stateless content (mini player, Now Playing in both skins, Queue, Search, Home, Library, Album, Artist, Playlist, Local playlist, Settings, Onboarding) under `en-XA` at font scale 2.0 and asserts the screen's primary node exists and, for bottom-bar and primary controls, is displayed (the layout check of decision 8); it passes on API 26 and 34.
+- Docs match behaviour: `docs/data-flow.md` lists browse requests, suggestions as typed, Google image CDN requests (IP revealed to Google's image servers; 100 MB cache, never backed up) and the DataStore exclusion; `PRIVACY.md` says the same in plain words; `README.md` status paragraph describes the usable player; `CONTRIBUTING.md` lists `check-ui-strings.sh`, `check-screen-imports.sh` and `capture-innertube-fixtures`.
+- `docs/release-gates.md`: the About-screen non-affiliation line is ticked (the Settings About section); "Parsers verified against live responses" stays unchecked with its instructions; the PoToken real-device gate is unchanged; a new unchecked line "TalkBack and font-scale pass on a device (manual checklist, UI shell section)".
+- `docs/manual-device-checklist.md` has a "UI shell" section: TalkBack walkthrough of mini player, Now Playing and queue; font scale 2.0 and display size large; rotate during playback; first-run onboarding and the notification prompt on Android 13+; Library with 1 500 songs (scroll, sort, filter), play from song 900 and see the "queued 500 of N" message; offline Home shows the cached shelves and the "may be outdated" banner after 7 days (set the clock forward); airplane-mode search shows the offline state; Settings changes (history threshold, endless radio) take effect without restarting; Apple-style skin toggle.
+- Greps return nothing outside `.internal/`: `coming_soon`, `Task 13`, `legacySearch`, `PlayerScreen`, `TODO`, `FIXME`. `scripts/ui-strings-baseline.txt` has no entries. `checkModuleGraph`, `checkLicense`, `check-no-destructive-migration.sh`, `check-backup-rules.sh` pass.
+
+- [ ] **Step 1: Matrix test.** One test per screen using the same pattern (sample states are the ones the per-screen tests use):
+
+```kotlin
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui
+
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.*
+import androidx.compose.ui.test.junit4.createComposeRule
+import app.aria.domain.*
+import app.aria.domain.testing.Samples
+import app.aria.music.player.PlayerStatus
+import app.aria.music.ui.detail.*
+import app.aria.music.ui.home.*
+import app.aria.music.ui.library.*
+import app.aria.music.ui.miniplayer.*
+import app.aria.music.ui.nowplaying.*
+import app.aria.music.ui.onboarding.*
+import app.aria.music.ui.playlists.*
+import app.aria.music.ui.queue.*
+import app.aria.music.ui.search.*
+import app.aria.music.ui.settings.*
+import org.junit.Rule
+import org.junit.Test
+
+/** Decision 8: every screen's layout holds under the en-XA pseudolocale (long accented strings) and font scale 2.0. */
+class PseudoLocaleMatrixTest {
+    @get:Rule val rule = createComposeRule()
+    private fun check(tag: String, content: @androidx.compose.runtime.Composable () -> Unit) {
+        rule.setContent { AriaTestTheme(pseudo = true, fontScale = 2f) { content() } }
+        rule.onNodeWithTag(tag).assertExists()
+    }
+    private val track = Samples.track(1)
+    private val np = NowPlayingUiState.Content(track, PlayerStatus.PLAYING, 180_000, true, RepeatMode.ALL, SleepTimer(null, true), true, 3, 0, 15)
+    private val npActions = NowPlayingActions({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {})
+
+    @Test fun miniPlayer() = check(TAG_MINI_PLAY) { MiniPlayerContent(MiniPlayerUiState.Showing("Title", listOf("A"), null, true, PlayerStatus.PLAYING, 1_000), { 0L }, {}, {}, {}) }
+    @Test fun nowPlayingMaterial() = check(TAG_NP_PLAY) { NowPlayingContent(np, { 0L }, npActions) }
+    @Test fun nowPlayingApple() = check(TAG_NP_PLAY) { AppleNowPlayingContent(np, { 0L }, npActions) }
+    @Test fun queue() = check(TAG_QUEUE_LIST) { QueueContent(QueueUiState.Content(listOf(QueueRow(1, 0, track, true))), QueueActions({}, {}, {}, {}, {}, {})) }
+    @Test fun settings() = check(TAG_SETTINGS_RADIO) { SettingsContent(SettingsUiState.Content(AppSettings()), "0.1.0", "Aria", SettingsActions({}, {}, {}, {}, {}, {}, {})) }
+    @Test fun onboarding() = check(TAG_ONBOARDING_NEXT) { OnboardingContent(true, OnboardingActions({}, {})) }
+    @Test fun home() = check(TAG_HOME_LIST) { HomeContent(HomeUiState(listOf(track), listOf(track), RemoteSection.Loading, false), HomeActions({ _, _ -> }, {}, {}, {}, {}, {}, { _, _ -> })) }
+    @Test fun library() = check(TAG_LIBRARY_LIST) {
+        LibraryContent(LibraryUiState(LibraryTab.SONGS, "", LibrarySort.RECENTLY_ADDED, LibraryContent.Songs(listOf(LibrarySong(track, false)))), LibraryActions({}, {}, {}, { _, _ -> }, {}, {}, { _, _ -> }, {}, {}, {}))
+    }
+}
+```
+
+  (Album, Artist, Playlist, Local playlist and Search follow the same one-line pattern using the tags `detail:list`, `detail:list`, `detail:list`, `playlist:menu:10`, and the search field tag; write them out when typing, using the states from `DetailPagesTest`, `PlaylistsTest` and `SearchTest`. `SettingsActions` includes `onSkin` since Task 23, hence seven lambdas.)
+- [ ] **Step 2: Docs and cleanup.** Apply the Acceptance Criteria edits to the listed docs. Remove `coming_soon` from `strings.xml`. Update the `app` row of `docs/provenance.csv` to "Application module written for Aria: Hilt wiring, navigation shell, Compose screens (home, search, library, detail pages, now playing, queue, settings, onboarding), PlayerController, image pipeline, crash log, backup rules, foss/gms flavors, UI guard scripts". Run the greps.
+- [ ] **Step 3: Final verification.** (1) Push; every CI job (`verify`, `glass-ui`, `playback-service`, `app-ui`) green on the final commit on API 26 and 34. (2) Dispatch `debug-apk` once, confirm both flavors build, hand the maintainer the run link and remind them to delete the artifact after downloading (ADR-0002). (3) The controller dispatches a final whole-branch review (fresh reviewer; this plan and the spec as inputs); fix findings and re-check CI. (4) Report to the maintainer: the manual checklist to run, that "Parsers verified against live responses" and the PoToken real-device gate remain open, and that no public release comes from this sub-project.
+- [ ] **Step 4: Commit** `docs,test: pseudolocale matrix, docs and release gates for the UI shell`.
+
+---
+
+## Spec coverage table
+
+Spec sections 1 to 8 and the nine resolved decisions of "Stress Test Results: UI shell".
+
+| Spec item | Task(s) |
+|---|---|
+| 1 Scope: navigation shell, three tabs, persistent mini player | 12, 13 |
+| 1 Home (Quick picks, shelves, Recently played, pull to refresh, cached copy) | 7, 17 |
+| 1 Search and results (debounced suggestions, grouped results, clearable local history) | 4, 6, 16 |
+| 1 Library: Songs, Albums, Artists, Playlists; likes in the database; create, rename, reorder playlists; play, shuffle, add to queue from anywhere | 4, 18, 20 (queue actions: 16, 17, 18, 19) |
+| 1 Album, Artist, Playlist pages | 6, 19 |
+| 1 Now Playing, two skins on one shared state; play/pause, seek, next/previous, repeat, shuffle, like, sleep timer, queue; lyrics slot empty | 14 (Material), 23 (Apple) |
+| 1 Queue | 15 |
+| 1 Settings (history threshold, endless radio, skip silence, loudness, sleep defaults) persisted in DataStore | 1, 2, 5, 9, 21 |
+| 1 First-run onboarding including notification permission | 12 (rationale at first play), 22 |
+| 1 Out of scope items (downloads, lyrics, Spotify, Auto, widget, Cast, stats, EQ, Discord, recognition) | not built; lyrics slot only (14) |
+| 2.1-2.3 Decisions: usable player; data layer first; Navigation Compose with type-safe routes, per-screen Hilt ViewModels, screens as packages in `:app` | 0 (versions), 1-9 (data first), 12 (routes), every screen task (ViewModels) |
+| 3 Phase A: domain contracts, `:data` DAOs and repositories with Room tests, `:innertube` adapters with fixture tests, per-shelf failure, fakes for every contract, `ModuleGraphRules` unchanged | 1, 3, 4, 6, 7 |
+| 3 Phase B: shell, mini player above the bar, `PlayerController` as the only playback entry | 8, 12, 13 |
+| 3 Conventions: one ViewModel and one `StateFlow<UiState>` per screen; loading/empty/error/offline everywhere; glass only through `GlassSurface`; playback errors as non-blocking messages | Global Constraints (conventions), 12 (states, message host), every screen task, 13 and 23 (GlassSurface) |
+| 4 Images over https via `StreamUrlPolicy`, invalid artwork dropped | 11 |
+| 4 No analytics, no crash services; history, likes, playlists local; Compose escapes text; no new WebViews | Global Constraints, 4, 24 (docs) |
+| 4 Content descriptions, 48dp targets, font scaling, TalkBack labels, checked in Compose UI tests | 12-23 (each UI test), 24 (matrix, manual TalkBack) |
+| 5 Testing: ViewModel tests on fakes, repository tests on Room, parser fixture tests, Compose UI tests in API 26/34 emulator jobs | 1 (fakes), 4, 6, 7, 8-23, 12 (`app-ui` job) |
+| 5 CI iteration policy (max 4 rounds, never weaken) | Global Constraints |
+| 6 Risks (parsing churn, scope, no real-device confirmation) | Risks section, 6, cut order, 24 |
+| 7 Definition of done: CI green on API 26/34, manual checklist, debug APK workflow, docs and module graph, whole-branch review, no public release | 24 |
+| 8 Open items (name, package ID, verification metadata, Dependabot, PoToken confirmation) | not in scope; stay open in `docs/release-gates.md` (24) |
+| ADR-0003 library semantics (inLibrary, like, add, plays-only, upsert, no sync, reserved tokens) | 1 (contracts), 4 (SQL and tests), 16, 18, 19 (UI use) |
+| Decision 1: synthetic fixtures, capture script, stale-fixture test, release gate, adapters over `YouTube.*` | 6 (and 0 findings, 24 checklist) |
+| Decision 2: library definition, upserts, no sync | 4 |
+| Decision 3: Home cache table, SWR, 7-day marker, drop undecodable rows, nothing else cached, offline local sections, migration with test and regenerated schema | 3 (table, migration), 7 (logic, codec, drop), 17 (UI, marker, offline) |
+| Decision 4: `PlayerController` singleton, slow state vs position flow, message channel, service-start test | 8 |
+| Decision 5: `SettingsRepository` in `:domain`, DataStore in `:data`, applied by the Application, `historyThresholdMs` clamp 10-120 s, stored value reaches engine without a screen | 1, 2, 5, 9 (test), 21 |
+| Decision 6: Coil 3 + network module verified, URL/host interceptor in one place with tests, 100 MB cache excluded from backup, decoded size capped, `docs/data-flow.md` IP disclosure | 0, 11, 24 |
+| Decision 7: five slices and the fixed cut order, UI tests with each slice | slices marked in every task; cut order in Global Constraints and Tasks 17 (step 4), 20 (step 4), 22 (step 4), 23 |
+| Decision 8: strings in `strings.xml`, CI script with pytest, plurals, locale-aware formatting, English only, en-XA layout check | 10 (script), 12 (formatters, plurals, `AriaTestTheme`, pseudolocales), every UI test, 24 (matrix) |
+| Decision 9: Room Flow lists with SQL sort and filter, slim projections, stable keys, no Paging, 500-item window with message, transactional playlist reorder with test | 4 (SQL, projections, reorder test), 8 (window), 18 (keys, UI), 20 (reorder UI) |
+
+## Risks
+
+- **No dependency version is verified.** The sandbox cannot reach Maven. Task 0 treats every new coordinate as a candidate and resolves them through CI (`Could not resolve` shows in the first push). Navigation Compose, Coil 3 and DataStore APIs were written from memory; Task 0 reads their sources, CI compile is the arbiter, and affected tasks list the exact lines to change.
+- **Room schema v2.** The first CI run of Task 3 is expected red on the schema-unchanged step until `2.json` is committed. `AppModule` must keep the migration registered or installed debug builds crash on open (the migration test guards the SQL, not the registration; `HiltWiringTest` opens the real database on the emulator).
+- **`java-test-fixtures` consumed from Android modules** (Task 1) is unproven here; the documented fallback moves the fakes into `:domain` main (not ideal, but harmless).
+- **DAO base class `TrackWriterDao`** (Task 4) relies on Room reading `@Insert` methods from a non-annotated abstract superclass; fallback duplicates the three inserts.
+- **Live YouTube Music shapes are unverified.** Synthetic fixtures prove mapping logic and null-safety only. `AlbumPage.getSong` uses `!!` and one odd row can fail a whole album (shown as the error state). The release gate "Parsers verified against live responses" stays open until a maintainer runs the capture script; the freshness test only fails 60 days after a capture exists. No nightly check of browse parsers exists (parking lot).
+- **Region reason.** The engine reports only "unavailable" and "network error" skip reasons (it is unchanged), so the user message cannot say "region" as the spec wished; unknown reasons say "could not play".
+- **Compose UI tests need the emulator job** (`app-ui`, 6-9 min per API level; 25 tasks times 4 CI rounds is the worst case). `package=app.aria.music.ui` filtering of sub-packages is assumed; Task 12 lists the fallback. Pseudolocale `en-XA` resolution through `createConfigurationContext` is assumed.
+- **Own icon vectors** (Task 12) use hand-typed path data; a wrong path draws a wrong glyph but cannot crash (`PathParser` errors are caught by CI tests only if parsing throws). Check visually in the manual checklist.
+- **`PullToRefreshBox`** (Task 17) exists in Material3 1.3+; the alpha27 signature is unverified.
+- **Temporary legacy exemption** in `scripts/ui-strings-baseline.txt` (Task 10) exists for `PlayerScreen.kt` only and is removed in Task 16; the script fails on stale entries.
+- **Scope:** 25 tasks. Cut order is fixed (Apple skin, Home shelf variety, reorder, onboarding polish); each cut leaves every earlier acceptance criterion intact.
+
+## Self-Review
+
+**Spec conflicts and deviations (surfaced to the maintainer):**
+1. Spec section 6 and decision 3 ask for a Room schema change "with Migration test", while the foundation spec and the playback plan say the schema stays at version 1 until the first beta. This plan follows the newer instruction (version 2 and `MIGRATION_1_2`) because `AppModule` forbids destructive migration and an installed debug build would otherwise crash.
+2. Spec section 3 says onboarding includes the notification permission; section 3 also says it is explained "at the moment it is needed". Both are implemented: an optional request on the last onboarding page (Task 22) and the rationale dialog at first playback (Task 12).
+3. Spec section 3 wants skip reasons offline, unavailable and region. The engine (unchanged by design) exposes two string reasons; "region" cannot be reported (Risks).
+4. Decision 4 says `PlayerController` "wraps `PlaybackEngineProvider`"; the plan wraps the `PlaybackEngine` interface (the same engine instance Hilt provides) so it can be unit-tested with a fake; the provider interface stays the service's hook.
+5. Decision 3 says "keyed by shelf type"; the remote Home feed has no stable type, so rows are keyed by slot (`yt:00`, `yt:01`, ...) and replaced as a set.
+6. Library Playlists show user-created playlists only; saving a YouTube playlist is not in scope (it would need copying thousands of tracks), and `YouTube.library` is account-based, which ADR-0003 rules out.
+7. The manual-dispatch debug APK remains public while the repo is public (ADR-0002); the final task repeats the warning.
+
+**Consistency checks performed:** every type and function used by a later task is defined earlier with the same name and signature: `Track` (unchanged), `AlbumRef/ArtistRef/PlaylistRef` (Task 1) used in Tasks 4, 6, 7, 16-20; `LibraryRepository` (Task 1, implemented Task 4, faked Task 1) used with identical members in Tasks 14, 16-19; `PlaylistRepository.reorder(playlistId, orderedEntryIds)` (Tasks 1, 4, 20); `PlayerController` members (Task 8) used verbatim in Tasks 13-22; `TrackMenuAction` and `TrackRow` (Task 16, extended by `showDefaultMenu` in Task 18 and `extraActions` use in Task 20); `AppSettings` property order (Task 1) with `nowPlayingSkin` appended last (Task 23); `SettingsActions` gains `onSkin` last (Task 23, reflected in Task 24); `AriaRoot()` signature changes in Tasks 16 and 22 and the NavHost builder takes `start` after Task 22. Route classes are defined once (Task 12) and used by name (`AlbumRoute(id)`, `ArtistRoute(id)`, `PlaylistRoute(id, local)`). Compose tests use the tags defined in the owning task.
+
+**Placeholders and known rough edges to clean while typing (none change a signature):** a few test snippets carry a "when typing" note where a fully qualified call must become an import (`first`), a couple of screen composables are specified by exact structure, tags and strings instead of full code (Tasks 14, 16-22), and Task 24's matrix lists five screens by pattern. The only forward reference in production code is the `/* Task 13 */` slot in Task 12, replaced in Task 13 and checked by Task 24's grep.
