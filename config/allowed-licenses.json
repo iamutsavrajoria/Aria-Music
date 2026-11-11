@@ -53,6 +53,9 @@
     },
     {
       "moduleLicense": "Eclipse Public License - v 2.0"
+    },
+    {
+      "moduleLicense": "The 3-Clause BSD License"
     }
   ]
 }
