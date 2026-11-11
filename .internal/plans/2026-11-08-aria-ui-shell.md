@@ -6434,3 +6434,8 @@ Region-specific error wording; API 26-only failures are found at slice boundarie
 ### Confidence Assessment
 - Overall: Medium. The plan is thorough and honest about unverified APIs, but about 25 tasks of Compose code are uncompiled; the canary and per-task CI limit the blast radius.
 - Areas of concern: Material3 1.5.0-alpha27 signatures, `java-test-fixtures` from Android modules, emulator-job time.
+
+## Controller notes during execution
+
+- Task 1 review (2026-11-12): `BrowseItem.key` is unique per kind+id, not per list. Task 6 adapters must `distinctBy { it.key }` shelf and section items (as search results already do), and Task 17's `ShelfRow` must not rely on keys being unique without that (suffix the index if a duplicate can reach it). Minor fake clean-ups noted: `FakeSettingsRepository.update` should use `state.update`; `FakePlaylistRepository` throws on unknown ids inconsistently with the interface KDoc; `FakeHomeRepository` ignores `limit`.
+- Task 0: licence allowlist gained the spelling "The 3-Clause BSD License" (DataStore's protobuf); revisit in the pre-beta allowlist review.
