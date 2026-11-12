@@ -34,6 +34,7 @@ data class PlaybackState(
     val skipSilence: Boolean = false,
     val normalizeLoudness: Boolean = true,
     val endlessRadio: Boolean = true,
+    val historyThresholdMs: Long = AppSettings.DEFAULT_HISTORY_THRESHOLD_MS,
 ) {
     val current: QueueItem? get() = queue.getOrNull(currentIndex)
 }
@@ -58,6 +59,8 @@ interface PlaybackEngine {
     fun pause()
     fun next()
     fun previous()
+    /** Listening time before a play is recorded; clamped to 10-120 s. */
+    fun setHistoryThresholdMs(ms: Long)
     fun seekTo(positionMs: Long)
     fun setShuffle(on: Boolean)
     fun setRepeat(mode: RepeatMode)

@@ -48,6 +48,7 @@ class DefaultPlaybackEngine(
     private var normalizeLoudness = true
     private var endlessRadio = true
 
+    private var historyThresholdMs = AppSettings.DEFAULT_HISTORY_THRESHOLD_MS
     private val _state = MutableStateFlow(PlaybackState())
     override val state: StateFlow<PlaybackState> = _state.asStateFlow()
     private val _events = MutableSharedFlow<PlaybackEvent>(extraBufferCapacity = 16)
@@ -96,12 +97,18 @@ class DefaultPlaybackEngine(
         else -> PlaybackStatus.Playing
     }
 
+    override fun setHistoryThresholdMs(ms: Long) {
+        historyThresholdMs = ms.coerceIn(AppSettings.MIN_HISTORY_THRESHOLD_MS, AppSettings.MAX_HISTORY_THRESHOLD_MS)
+        publish()
+    }
+
     private fun publish() {
         _state.value = PlaybackState(
             queue = model.items, currentIndex = model.index, status = status(), positionMs = positionMs,
             durationMs = output?.durationMs()?.takeIf { it > 0 } ?: model.current?.track?.durationMs ?: 0L,
             shuffle = model.shuffle, repeat = repeatMode, sleepTimer = sleepTimer,
             skipSilence = skipSilence, normalizeLoudness = normalizeLoudness, endlessRadio = endlessRadio,
+            historyThresholdMs = historyThresholdMs,
         )
     }
 
@@ -148,7 +155,7 @@ class DefaultPlaybackEngine(
         positionMs = out.positionMs()
         if (status() == PlaybackStatus.Playing) {
             listenedMs += TICK_MS; sinceSaveMs += TICK_MS
-            if (!recorded && listenedMs >= HISTORY_THRESHOLD_MS) { recorded = true; recordPlay() }
+            if (!recorded && listenedMs >= historyThresholdMs) { recorded = true; recordPlay() }
             if (sinceSaveMs >= POSITION_SAVE_MS) savePosition()
         }
         publish()
@@ -481,7 +488,7 @@ class DefaultPlaybackEngine(
     companion object {
         const val TICK_MS = 500L
         const val PREVIOUS_RESTART_MS = 3_000L
-        const val HISTORY_THRESHOLD_MS = 30_000L
+        const val HISTORY_THRESHOLD_MS = AppSettings.DEFAULT_HISTORY_THRESHOLD_MS
         const val POSITION_SAVE_MS = 15_000L
         const val RESOLVE_TIMEOUT_MS = 20_000L
         const val EXPIRY_MARGIN_MS = 60_000L
