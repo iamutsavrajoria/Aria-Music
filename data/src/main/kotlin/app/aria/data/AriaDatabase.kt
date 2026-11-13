@@ -10,6 +10,7 @@ import app.aria.data.entities.ArtistEntity
 import app.aria.data.entities.BeatInfoEntity
 import app.aria.data.entities.Event
 import app.aria.data.entities.FormatEntity
+import app.aria.data.entities.HomeShelfCacheEntity
 import app.aria.data.entities.LyricsEntity
 import app.aria.data.entities.PlayCountEntity
 import app.aria.data.entities.PlaylistEntity
@@ -34,11 +35,11 @@ import app.aria.data.entities.TasteProfileEntity
 import app.aria.data.entities.TrackMatchEntity
 
 /**
- * Schema version 1. Until the first public build the exported JSON in `schemas/` is regenerated
+ * Schema version 2 (v1 plus `home_shelf_cache`, see AriaMigrations). Until the first public build the exported JSON in `schemas/` is regenerated
  * freely; from the first beta on it is frozen and every change needs a tested migration.
  * Release builds must never use destructive migration fallback.
  *
- * Tables: 25 (21 ported from Echo, `podcast` from Meld, plus Aria's `track_match`, `queue_item` and `queue_state`) and 3 views. Meld's
+ * Tables: 26 (21 ported from Echo, `podcast` from Meld, plus Aria's `track_match`, `queue_item`, `queue_state` and `home_shelf_cache`) and 3 views. Meld's
  * `ArtistPageCache.kt` is not a table (plain serialization DTOs) and is not ported here.
  */
 @Database(
@@ -49,10 +50,10 @@ import app.aria.data.entities.TrackMatchEntity
         RelatedSongMap::class, SearchHistory::class, SpeedDialItem::class, SetVideoIdEntity::class,
         RecognitionHistory::class, BeatInfoEntity::class, RecommendationExclusionEntity::class,
         SongPlayStatsEntity::class, TasteProfileEntity::class, PodcastEntity::class,
-        QueueItemEntity::class, QueueStateEntity::class,
+        QueueItemEntity::class, QueueStateEntity::class, HomeShelfCacheEntity::class,
     ],
     views = [SortedSongArtistMap::class, SortedSongAlbumMap::class, PlaylistSongMapPreview::class],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -60,4 +61,5 @@ abstract class AriaDatabase : RoomDatabase() {
     abstract fun trackMatchDao(): TrackMatchDao
     abstract fun playEventDao(): PlayEventDao
     abstract fun queueDao(): QueueDao
+    abstract fun homeShelfCacheDao(): HomeShelfCacheDao
 }

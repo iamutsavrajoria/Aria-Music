@@ -4,6 +4,7 @@ package app.aria.music.di
 import android.content.Context
 import androidx.room.Room
 import app.aria.data.AriaDatabase
+import app.aria.data.AriaMigrations
 import app.aria.data.PlayEventRepositoryImpl
 import app.aria.data.QueueStoreImpl
 import app.aria.domain.NetworkMonitor
@@ -34,7 +35,7 @@ import javax.inject.Singleton
 object AppModule {
     @Provides @Singleton
     fun database(@ApplicationContext c: Context): AriaDatabase =
-        Room.databaseBuilder(c, AriaDatabase::class.java, "aria.db").build() // never fall back to a destructive migration
+        Room.databaseBuilder(c, AriaDatabase::class.java, "aria.db").addMigrations(AriaMigrations.MIGRATION_1_2).build() // never fall back to a destructive migration
 
     @Provides @Singleton fun playEvents(db: AriaDatabase): PlayEventRepository = PlayEventRepositoryImpl(db.playEventDao())
     @Provides @Singleton fun search(): SearchSource = YouTubeSearchSource()
