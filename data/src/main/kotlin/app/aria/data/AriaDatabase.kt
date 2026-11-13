@@ -62,4 +62,8 @@ abstract class AriaDatabase : RoomDatabase() {
     abstract fun playEventDao(): PlayEventDao
     abstract fun queueDao(): QueueDao
     abstract fun homeShelfCacheDao(): HomeShelfCacheDao
+    abstract fun libraryDao(): LibraryDao
+    abstract fun playlistDao(): PlaylistDao
+    abstract fun homeLocalDao(): HomeLocalDao
+    abstract fun searchHistoryDao(): SearchHistoryDao
 }
