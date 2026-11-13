@@ -17,7 +17,7 @@ internal const val NAME_SEP = "\u001F"
 internal const val SONG_ROW_COLUMNS =
     "s.id AS id, s.title AS title, s.duration AS duration, s.thumbnailUrl AS thumbnailUrl, s.liked AS liked, " +
         "(SELECT group_concat(n, char(31)) FROM (SELECT a.name AS n FROM song_artist_map m " +
-        "JOIN artist a ON a.id = m.artistId WHERE m.songId = s.id ORDER BY m.position)) AS artistNames"
+        "JOIN artist a ON a.id = m.artistId WHERE m.songId = s.id ORDER BY m.position, a.id)) AS artistNames"
 
 data class SongRow(
     val id: String, val title: String, val duration: Int, val thumbnailUrl: String?, val liked: Boolean, val artistNames: String?,

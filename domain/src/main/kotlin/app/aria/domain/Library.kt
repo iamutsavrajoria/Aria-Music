@@ -33,7 +33,9 @@ interface PlaylistRepository {
     fun playlists(query: String, sort: LibrarySort): Flow<List<PlaylistRef>>
     fun playlist(id: String): Flow<PlaylistRef?>
     fun tracks(playlistId: String): Flow<List<PlaylistTrackRow>>
+    /** [name] is trimmed; a blank name throws IllegalArgumentException. */
     suspend fun create(name: String): String
+    /** [name] is trimmed; a blank name throws IllegalArgumentException and nothing changes. */
     suspend fun rename(id: String, name: String)
     suspend fun delete(id: String)
     suspend fun addTracks(id: String, tracks: List<Track>)

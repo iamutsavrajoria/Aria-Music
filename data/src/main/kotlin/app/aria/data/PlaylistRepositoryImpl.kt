@@ -15,6 +15,8 @@ class PlaylistRepositoryImpl(
 ) : PlaylistRepository {
     private fun now(): LocalDateTime = LocalDateTime.ofInstant(Instant.ofEpochMilli(clock()), ZoneOffset.UTC)
 
+    private fun requireName(name: String) = name.trim().also { require(it.isNotEmpty()) { "playlist name must not be blank" } }
+
     override fun playlists(query: String, sort: LibrarySort): Flow<List<PlaylistRef>> =
         dao.playlists(query.escapeLike(), if (sort == LibrarySort.TITLE) 1 else 0).map { rows -> rows.map { it.toRef() } }
     override fun playlist(id: String): Flow<PlaylistRef?> = dao.playlist(id).map { it?.toRef() }
@@ -25,10 +27,10 @@ class PlaylistRepositoryImpl(
     }
 
     override suspend fun create(name: String): String {
-        val entity = PlaylistEntity(name = name.trim(), createdAt = now(), lastUpdateTime = now(), isEditable = true, isLocal = true)
+        val entity = PlaylistEntity(name = requireName(name), createdAt = now(), lastUpdateTime = now(), isEditable = true, isLocal = true)
         dao.insertPlaylist(entity); return entity.id
     }
-    override suspend fun rename(id: String, name: String) = dao.rename(id, name.trim(), now())
+    override suspend fun rename(id: String, name: String) = dao.rename(id, requireName(name), now())
     override suspend fun delete(id: String) = dao.delete(id)
     override suspend fun addTracks(id: String, tracks: List<Track>) = dao.addTracks(id, tracks.map { it.toWrite() })
     override suspend fun removeEntry(playlistId: String, entryId: Int) = dao.deleteEntry(playlistId, entryId)

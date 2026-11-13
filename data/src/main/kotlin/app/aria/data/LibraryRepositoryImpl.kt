@@ -41,7 +41,7 @@ class LibraryRepositoryImpl(
     }
 
     override suspend fun setArtistFollowed(artist: ArtistRef, followed: Boolean) {
-        if (followed) dao.upsertArtist(ArtistEntity(id = artist.id, name = artist.name, thumbnailUrl = artist.thumbnailUrl, bookmarkedAt = now()))
+        if (followed) dao.followArtist(ArtistEntity(id = artist.id, name = artist.name, thumbnailUrl = artist.thumbnailUrl, bookmarkedAt = now()))
         else dao.unfollowArtist(artist.id)
     }
 }
