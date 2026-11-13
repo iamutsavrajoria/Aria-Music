@@ -4,6 +4,7 @@ table:artist
 table:beat_info
 table:event
 table:format
+table:home_shelf_cache
 table:lyrics
 table:playCount
 table:playlist

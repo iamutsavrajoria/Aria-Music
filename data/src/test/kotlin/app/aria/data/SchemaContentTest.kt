@@ -18,7 +18,7 @@ import org.robolectric.RobolectricTestRunner
 @RunWith(RobolectricTestRunner::class)
 class SchemaContentTest {
     private fun names(): Set<String> {
-        val db = JSONObject(File("schemas/app.aria.data.AriaDatabase/1.json").readText()).getJSONObject("database")
+        val db = JSONObject(File("schemas/app.aria.data.AriaDatabase/2.json").readText()).getJSONObject("database")
         val entities = db.getJSONArray("entities")
         val tables = (0 until entities.length()).map { "table:" + entities.getJSONObject(it).getString("tableName") }
         val viewArray = db.optJSONArray("views")
@@ -32,9 +32,9 @@ class SchemaContentTest {
         assertEquals(expected, names())
     }
 
-    @Test fun hasTwentyFiveTablesAndThreeViews() {
+    @Test fun hasTwentySixTablesAndThreeViews() {
         val n = names()
-        assertEquals(25, n.count { it.startsWith("table:") })
+        assertEquals(26, n.count { it.startsWith("table:") })
         assertEquals(3, n.count { it.startsWith("view:") })
     }
 
