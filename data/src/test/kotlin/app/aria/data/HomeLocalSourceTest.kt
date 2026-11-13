@@ -45,4 +45,11 @@ class HomeLocalSourceTest {
         plays.record(t(1), 1_000, 1); plays.record(t(2), 2_000, 1); plays.record(t(2), 3_000, 1)
         assertEquals(listOf("Song 2", "Song 1"), home.quickPicks(10).first().map { it.title })
     }
+
+    @Test fun quickPicksSkipSongsHiddenFromQuickPicks() = runBlocking {
+        plays.record(t(1), 1_000, 1); plays.record(t(1), 2_000, 1); plays.record(t(2), 3_000, 1)
+        db.openHelper.writableDatabase.execSQL("UPDATE song SET hideFromQuickPicks = 1 WHERE id = '${t(1).id.raw}'")
+        assertEquals(listOf("Song 2"), home.quickPicks(10).first().map { it.title })
+        assertEquals(listOf("Song 2", "Song 1"), home.recentlyPlayed(10).first().map { it.title })
+    }
 }

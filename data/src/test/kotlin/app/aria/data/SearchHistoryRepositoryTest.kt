@@ -41,4 +41,9 @@ class SearchHistoryRepositoryTest {
         assertEquals(50, r.size); assertEquals("q60", r.first()); assertEquals("q11", r.last())
     }
     @Test fun blankQueriesAreIgnored() = runBlocking { repo.add("   "); assertTrue(repo.recent(10).first().isEmpty()) }
+    @Test fun removeTrimsLikeAddDoes() = runBlocking {
+        repo.add("  a  "); repo.add("b")
+        repo.remove("  a ")
+        assertEquals(listOf("b"), repo.recent(10).first())
+    }
 }

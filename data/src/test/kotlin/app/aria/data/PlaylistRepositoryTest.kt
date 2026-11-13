@@ -71,4 +71,14 @@ class PlaylistRepositoryTest {
         val id = repo.create("P"); repo.addTracks(id, listOf(t(1)))
         assertTrue(LibraryRepositoryImpl(db.libraryDao()).songs("", LibrarySort.TITLE).first().isEmpty())
     }
+
+    @Test fun blankNamesAreRejected() = runBlocking {
+        try { repo.create("   "); fail("expected IllegalArgumentException") } catch (_: IllegalArgumentException) {}
+        assertTrue(repo.playlists("", LibrarySort.TITLE).first().isEmpty())
+        val id = repo.create("  Mine  ")
+        assertEquals("Mine", repo.playlist(id).first()?.title)
+        try { repo.rename(id, ""); fail("expected IllegalArgumentException") } catch (_: IllegalArgumentException) {}
+        try { repo.rename(id, "  \t "); fail("expected IllegalArgumentException") } catch (_: IllegalArgumentException) {}
+        assertEquals("Mine", repo.playlist(id).first()?.title)
+    }
 }
