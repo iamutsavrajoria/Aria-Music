@@ -6439,3 +6439,4 @@ Region-specific error wording; API 26-only failures are found at slice boundarie
 
 - Task 1 review (2026-11-12): `BrowseItem.key` is unique per kind+id, not per list. Task 6 adapters must `distinctBy { it.key }` shelf and section items (as search results already do), and Task 17's `ShelfRow` must not rely on keys being unique without that (suffix the index if a duplicate can reach it). Minor fake clean-ups noted: `FakeSettingsRepository.update` should use `state.update`; `FakePlaylistRepository` throws on unknown ids inconsistently with the interface KDoc; `FakeHomeRepository` ignores `limit`.
 - Task 0: licence allowlist gained the spelling "The 3-Clause BSD License" (DataStore's protobuf); revisit in the pre-beta allowlist review.
+- Task 3 review (2026-11-13): HomeShelfCacheDao.insert aborts on duplicate shelfKey (transaction rolls back, old cache survives): Task 7 must guarantee unique slot keys. CI print step prints only the first changed schema path (Low).
