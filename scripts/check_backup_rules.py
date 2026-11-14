@@ -23,6 +23,7 @@ REQUIRED = [
     ("database", "aria.db-journal"),
     ("sharedpref", "resume.xml"),   # playback resume position
     ("file", "crash/"),             # crash reports
+    ("file", "datastore/"),         # app settings (DataStore)
 ]
 
 

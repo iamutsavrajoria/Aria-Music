@@ -10,6 +10,7 @@
         <exclude domain="database" path="aria.db-journal" />
         <exclude domain="sharedpref" path="resume.xml" />
         <exclude domain="file" path="crash/" />
+        <exclude domain="file" path="datastore/" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="file" path="secure/" />
@@ -20,5 +21,6 @@
         <exclude domain="database" path="aria.db-journal" />
         <exclude domain="sharedpref" path="resume.xml" />
         <exclude domain="file" path="crash/" />
+        <exclude domain="file" path="datastore/" />
     </device-transfer>
 </data-extraction-rules>
