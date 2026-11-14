@@ -28,6 +28,7 @@ kotlin {
 // Smoke tests only run with -PrunSmoke=true (nightly workflow); otherwise they skip via assumeTrue.
 tasks.withType<Test>().configureEach {
     systemProperty("aria.smoke", providers.gradleProperty("runSmoke").orNull ?: "false")
+    systemProperty("aria.capture", providers.gradleProperty("captureFixtures").orNull ?: "false")
 }
 
 dependencies {
@@ -45,6 +46,7 @@ dependencies {
     implementation(libs.ktor.client.encoding)
     implementation(libs.timber)
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.serialization.json)
     testImplementation(libs.coroutines.core)
     testImplementation(libs.coroutines.test)
     testImplementation(libs.tink.android)

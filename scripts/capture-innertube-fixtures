@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-only
+# Maintainer-run: fetches real YouTube Music responses through the adapters and saves sanitized summaries
+# into innertube/src/test/resources/fixtures. Needs network access to music.youtube.com (CI and the sandbox cannot).
+# Review the git diff before committing; FixtureFreshnessTest fails 60 days after capture.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+./gradlew :innertube:testDebugUnitTest -PcaptureFixtures=true --tests '*FixtureCaptureTest' --console=plain
+echo "Captured. Review: git diff innertube/src/test/resources/fixtures"

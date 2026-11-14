@@ -31,6 +31,13 @@ Start each item from a signed-out app with a search result queued (search, then 
 - [ ] **Shuffle and repeat.** Queue five tracks. Turn shuffle on, then off. Expected: the order changes with shuffle on and the original order returns with shuffle off, with the current track unchanged. Cycle repeat through off, all and one. Expected: "all" wraps from the last track to the first, "one" repeats the current track.
 - [ ] **Endless radio.** Queue one track with "Endless radio" on and repeat off, then play to the end. Expected: related tracks are appended and playback continues.
 
+## Browse parsers (live)
+
+- [ ] **Home.** Home shows YouTube Music shelves and at least one tile of each kind (song, album, artist, playlist) opens.
+- [ ] **Detail pages.** An Album, an Artist and a Playlist page open from search and play.
+- [ ] **Search suggestions.** Suggestions appear while typing.
+- [ ] **Offline.** Airplane mode shows the offline state and the cached Home still shows.
+
 ## Debug APK
 
 The `debug-apk` workflow builds `foss` and `gms` debug APKs and is run by hand (Actions tab, "Run workflow"). The artifact is `aria-debug-<commit sha>`, kept for one day.
