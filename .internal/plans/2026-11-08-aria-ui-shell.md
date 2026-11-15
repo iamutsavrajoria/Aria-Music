@@ -6448,3 +6448,6 @@ Region-specific error wording; API 26-only failures are found at slice boundarie
 ### Controller note: Task 6 review (PASS, CI green 13fcad5)
 - Fix round 1 scope: (a) FixtureFreshnessTest must FAIL if fixture *.json files exist without a manifest.json (gate bypass); (b) make the open-gate message visible in CI console (testLogging showStandardStreams for that test only) ; (c) capture script cleans old fixture files before writing and forces rerun; (d) tests: mapper throw -> Result.failure, CancellationException rethrown; (e) docs/providers/youtube-music.md + data-flow.md row + kill-switch gate mention browse.
 - Open for later: an all-invalid-songs shelf is silently dropped, never `Failed` (matches brief; Task 7/17 should not rely on Failed for that). `parseCount` mishandles "1.5K". Task 11 must not assume adapters filter artwork URLs (https/allowlist enforced in the image interceptor only).
+
+### Controller note: Task 8 review (CI green b74903e; fix b4cd30d)
+- Fixed: controller's launcher.start() is now runCatching-guarded. Open minors: message channel is BUFFERED(64) with trySend (stale toasts possible, single consumer); the controller is a lazy singleton, so Task 12's shell MUST inject it at startup or early engine events are lost; `WAITING_FOR_NETWORK` toggle cannot pause (check in Task 14 UI); PlaybackStatus.Error detail dropped to bare ERROR.
