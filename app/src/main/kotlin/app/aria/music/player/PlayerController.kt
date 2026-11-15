@@ -33,7 +33,7 @@ class PlayerController @Inject constructor(
     fun play(tracks: List<Track>, startIndex: Int = 0) {
         if (tracks.isEmpty()) return
         val tapped = startIndex.coerceIn(0, tracks.lastIndex)
-        launcher.start()
+        startService()
         if (tracks.size > QUEUE_CAP) {
             val window = tracks.subList(tapped, minOf(tracks.size, tapped + QUEUE_CAP))
             engine.playNow(window, 0)
@@ -43,15 +43,18 @@ class PlayerController @Inject constructor(
         }
     }
 
-    fun playNext(track: Track) { launcher.start(); engine.playNext(track) }
+    fun playNext(track: Track) { startService(); engine.playNext(track) }
 
     fun addToQueue(tracks: List<Track>) {
         if (tracks.isEmpty()) return
         if (!ui.value.hasQueue) { play(tracks, 0); return }
         val room = (QUEUE_CAP - ui.value.queue.size).coerceAtLeast(0)
         if (tracks.size > room) channel.trySend(PlayerMessage.QueueFull(tracks.size - room))
-        launcher.start(); engine.addToEnd(tracks)
+        startService(); engine.addToEnd(tracks)
     }
+
+    /** Best effort: a refused start (background-start limits) must never block the queue command; the engine retries via its own guarded start. */
+    private fun startService() { runCatching { launcher.start() } }
 
     fun skipTo(index: Int) = engine.skipTo(index)
     fun removeAt(index: Int) = engine.removeAt(index)

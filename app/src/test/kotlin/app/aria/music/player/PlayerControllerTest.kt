@@ -98,4 +98,54 @@ class PlayerControllerTest {
         c.setSleepTimer(15); assertEquals("setSleepTimer:900000", engine.calls.last())
         c.setSleepTimer(null); assertEquals("setSleepTimer:null", engine.calls.last())
     }
+
+    private val throwingLauncher = ServiceLauncher { throw IllegalStateException("background start not allowed") }
+
+    @Test fun throwingLauncherDoesNotStopTheQueueOrThrow_fake() = runTest {
+        val engine = FakePlaybackEngine(); val c = controller(engine, throwingLauncher)
+        val tracks = Samples.tracks(3)
+        c.play(tracks, 1); c.playNext(tracks[0]); c.addToQueue(tracks); runCurrent()
+        assertEquals(tracks to 1, engine.playNowCalls.first())
+        assertTrue("playNext" in engine.calls)
+    }
+
+    @Test fun throwingLauncherDoesNotStopTheQueueOrThrow_realEngine() = runTest {
+        val engine = testEngine(StandardTestDispatcher(testScheduler)); val c = controller(engine, throwingLauncher)
+        val tracks = Samples.tracks(3)
+        c.play(tracks, 2); runCurrent()
+        assertEquals(tracks, engine.state.value.queue.map { it.track }); assertEquals(2, engine.state.value.currentIndex)
+        engine.release()
+    }
+
+    @Test fun realEngineUsesItsOwnGuardedServiceStartPath() = runTest {
+        val engine = testEngine(StandardTestDispatcher(testScheduler)); val launcher = Launcher(); val c = controller(engine, launcher)
+        var engineStarts = 0; engine.serviceStarter = { engineStarts++ }
+        val tracks = Samples.tracks(2)
+        c.play(tracks, 0); runCurrent()
+        assertTrue(engineStarts >= 1); assertEquals(tracks, engine.state.value.queue.map { it.track })
+        engine.serviceStarter = { throw IllegalStateException("background start not allowed") }
+        c.addToQueue(Samples.tracks(1, from = 50)); runCurrent()
+        assertEquals(3, engine.state.value.queue.size)
+        engine.release()
+    }
+
+    @Test fun addToQueueWithEmptyQueueTakesThePlayPath() = runTest {
+        val engine = FakePlaybackEngine(); val launcher = Launcher(); val c = controller(engine, launcher)
+        val tracks = Samples.tracks(2)
+        c.addToQueue(tracks); runCurrent()
+        assertEquals(listOf(tracks to 0), engine.playNowCalls); assertTrue("addToEnd" !in engine.calls); assertEquals(1, launcher.starts)
+    }
+
+    @Test fun startIndexIsClamped() = runTest {
+        val engine = FakePlaybackEngine(); val c = controller(engine)
+        val tracks = Samples.tracks(3)
+        c.play(tracks, 99); runCurrent(); c.play(tracks, -5); runCurrent()
+        assertEquals(listOf(tracks to 2, tracks to 0), engine.playNowCalls)
+    }
+
+    @Test fun playNextDelegatesAndStartsService() = runTest {
+        val engine = FakePlaybackEngine(); val launcher = Launcher(); val c = controller(engine, launcher)
+        c.playNext(Samples.track(7)); runCurrent()
+        assertEquals(1, launcher.starts); assertEquals("playNext", engine.calls.last())
+    }
 }
