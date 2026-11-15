@@ -2,6 +2,8 @@
 package app.aria.domain
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 
 /** Local Home sections; they work fully offline. */
 interface HomeLocalSource {
@@ -31,4 +33,38 @@ interface HomeRepository {
     suspend fun needsRevalidation(): Boolean
     /** Fetches fresh shelves and replaces the cache. A failure leaves the cache untouched. */
     suspend fun refresh(): Result<HomeRefresh>
+}
+
+class DefaultHomeRepository(
+    private val local: HomeLocalSource,
+    private val browse: BrowseSource,
+    private val cache: HomeShelfCache,
+    private val clock: () -> Long = System::currentTimeMillis,
+) : HomeRepository {
+    override fun quickPicks(limit: Int) = local.quickPicks(limit)
+    override fun recentlyPlayed(limit: Int) = local.recentlyPlayed(limit)
+
+    override fun remote(): Flow<HomeRemote?> = cache.observe().map { c ->
+        c?.takeIf { it.shelves.isNotEmpty() }?.let {
+            HomeRemote(it.shelves, it.fetchedAtEpochMs, outdated = clock() - it.fetchedAtEpochMs > OUTDATED_AFTER_MS)
+        }
+    }
+
+    override suspend fun needsRevalidation(): Boolean {
+        val c = cache.observe().first() ?: return true
+        return clock() - c.fetchedAtEpochMs > REVALIDATE_AFTER_MS
+    }
+
+    override suspend fun refresh(): Result<HomeRefresh> {
+        val states = browse.home().getOrElse { return Result.failure(it) }
+        val ready = states.filterIsInstance<ShelfState.Ready>().map { it.shelf }
+        if (ready.isEmpty()) return Result.failure(IllegalStateException("Home returned no usable shelves"))
+        cache.replace(ready, clock())
+        return Result.success(HomeRefresh(states))
+    }
+
+    companion object {
+        const val REVALIDATE_AFTER_MS = 15 * 60_000L
+        const val OUTDATED_AFTER_MS = 7L * 24 * 3600_000
+    }
 }
