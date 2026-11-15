@@ -17,12 +17,37 @@ class FixtureFreshnessTest {
         assertNull(FixtureFreshness.check(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 3, 2)))
         assertNotNull(FixtureFreshness.check(LocalDate.of(2026, 1, 1), LocalDate.of(2026, 3, 3)))
     }
-    /** Whatever is committed must be fresh. With no manifest yet (no maintainer capture) this passes; the release gate stays open. */
-    @Test fun committedManifestIsFresh() {
-        val manifest = java.io.File(FixtureFreshness.DIR, "manifest.json")
-        if (!manifest.exists()) { println("No live fixtures captured yet; release gate 'parsers verified against live responses' is open."); return }
-        val date = Regex("\"capturedAt\"\\s*:\\s*\"(\\d{4}-\\d{2}-\\d{2})\"").find(manifest.readText())?.groupValues?.get(1)
-        assertNotNull("manifest.json has no capturedAt", date)
-        assertNull(FixtureFreshness.check(LocalDate.parse(date), LocalDate.now()))
+    private fun tempDir(): java.io.File = java.nio.file.Files.createTempDirectory("fixtures").toFile()
+
+    @Test fun fixtureFilesWithoutManifestFail() {
+        val dir = tempDir()
+        java.io.File(dir, "home.json").writeText("{}")
+        val msg = FixtureFreshness.checkDir(dir, LocalDate.of(2026, 11, 8))
+        assertNotNull("fixtures without manifest.json must fail", msg)
+        assertEquals(true, msg!!.contains("manifest.json"))
+    }
+    @Test fun emptyDirOrMissingDirIsTheOpenGateNotAFailure() {
+        assertNull(FixtureFreshness.checkDir(tempDir(), LocalDate.of(2026, 11, 8)))
+        assertNull(FixtureFreshness.checkDir(java.io.File(tempDir(), "nope"), LocalDate.of(2026, 11, 8)))
+    }
+    @Test fun manifestWithoutCapturedAtFails() {
+        val dir = tempDir()
+        java.io.File(dir, "manifest.json").writeText("{}")
+        assertNotNull(FixtureFreshness.checkDir(dir, LocalDate.of(2026, 11, 8)))
+    }
+    @Test fun staleManifestFails() {
+        val dir = tempDir()
+        java.io.File(dir, "manifest.json").writeText("{\"capturedAt\": \"2026-01-01\"}")
+        assertNotNull(FixtureFreshness.checkDir(dir, LocalDate.of(2026, 11, 8)))
+        assertNull(FixtureFreshness.checkDir(dir, LocalDate.of(2026, 2, 1)))
+    }
+
+    /** Whatever is committed must be fresh, and fixtures must never exist without a manifest. With neither (no maintainer capture yet) this passes; the release gate stays open. */
+    @Test fun committedFixturesAreFresh() {
+        val dir = java.io.File(FixtureFreshness.DIR)
+        if (!java.io.File(dir, "manifest.json").exists() && dir.listFiles { f -> f.extension == "json" }.isNullOrEmpty()) {
+            println("No live fixtures captured yet; release gate 'parsers verified against live responses' is open.")
+        }
+        assertNull(FixtureFreshness.checkDir(dir, LocalDate.now()))
     }
 }

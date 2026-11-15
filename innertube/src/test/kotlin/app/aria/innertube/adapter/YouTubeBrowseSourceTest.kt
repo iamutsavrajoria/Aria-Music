@@ -24,4 +24,33 @@ class YouTubeBrowseSourceTest {
         assertEquals("UC1", src.artist("UC1").getOrThrow().artist.id); assertEquals("UC1", asked)
         assertEquals("next", src.playlistMore("c").getOrThrow().continuation)
     }
+
+    private val explodingPage = PlaylistContinuationPage(
+        object : kotlin.collections.AbstractList<SongItem>() {
+            override val size: Int get() = throw IllegalStateException("mapper boom")
+            override fun get(index: Int): SongItem = throw IllegalStateException("mapper boom")
+        },
+        "next",
+    )
+
+    @Test fun aMapperThrowBecomesFailure() = runBlocking {
+        val src = YouTubeBrowseSource(playlistMore = { Result.success(explodingPage) })
+        val r = src.playlistMore("c")
+        assertTrue(r.isFailure); assertEquals("mapper boom", r.exceptionOrNull()?.message)
+    }
+
+    @Test fun cancellationFromTheCallIsRethrown() {
+        val src = YouTubeBrowseSource(home = { throw kotlinx.coroutines.CancellationException("cancelled") })
+        assertThrows(kotlinx.coroutines.CancellationException::class.java) { runBlocking { src.home() } }
+    }
+
+    @Test fun cancellationFromTheMapperIsRethrown() {
+        val src = YouTubeBrowseSource(playlistMore = {
+            Result.success(PlaylistContinuationPage(object : kotlin.collections.AbstractList<SongItem>() {
+                override val size: Int get() = throw kotlinx.coroutines.CancellationException("cancelled")
+                override fun get(index: Int): SongItem = throw kotlinx.coroutines.CancellationException("cancelled")
+            }, null))
+        })
+        assertThrows(kotlinx.coroutines.CancellationException::class.java) { runBlocking { src.playlistMore("c") } }
+    }
 }

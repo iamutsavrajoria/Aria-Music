@@ -30,6 +30,7 @@ class FixtureCaptureTest {
     @Test fun capture() = runBlocking {
         assumeTrue(System.getProperty("aria.capture") == "true")
         val dir = File(FixtureFreshness.DIR).also { it.mkdirs() }
+        dir.listFiles { f -> f.isFile && f.extension == "json" }?.forEach { it.delete() } // no stale files from earlier captures
         val browse = YouTubeBrowseSource(); val search = YouTubeSearchRepository()
         val files = mutableListOf<String>()
 

@@ -31,6 +31,15 @@ tasks.withType<Test>().configureEach {
     systemProperty("aria.capture", providers.gradleProperty("captureFixtures").orNull ?: "false")
 }
 
+// Print the freshness test's "release gate open" message in the CI console (that test class only, not globally).
+tasks.withType<Test>().configureEach {
+    // A capture run must never be skipped as up-to-date.
+    if (providers.gradleProperty("captureFixtures").orNull == "true") outputs.upToDateWhen { false }
+    onOutput { descriptor, event ->
+        if (descriptor.className == "app.aria.innertube.fixtures.FixtureFreshnessTest") logger.lifecycle(event.message.trimEnd())
+    }
+}
+
 dependencies {
     api(project(":domain"))
     implementation(project(":core"))

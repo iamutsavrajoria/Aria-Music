@@ -21,7 +21,8 @@ class YouTubeBrowseSource(
     private val fetchPlaylistMore = playlistMore
 
     private suspend inline fun <T, R> call(block: suspend () -> Result<T>, map: (T) -> R): Result<R> = try {
-        block().mapCatching(map)
+        val value = block().getOrElse { return Result.failure(it) }
+        Result.success(map(value)) // not mapCatching: that would swallow a CancellationException from the mapper
     } catch (e: CancellationException) { throw e } catch (e: Exception) { Result.failure(e) }
 
     override suspend fun home() = call(fetchHome) { it.toShelfStates() }
