@@ -1,0 +1,51 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.player
+
+import app.aria.domain.*
+
+enum class PlayerStatus { IDLE, BUFFERING, PLAYING, PAUSED, WAITING_FOR_NETWORK, ERROR }
+
+/** Slow state: everything except the playback position (see PlayerController.positionMs). */
+data class PlayerUiState(
+    val queue: List<QueueItem> = emptyList(),
+    val currentIndex: Int = -1,
+    val status: PlayerStatus = PlayerStatus.IDLE,
+    val durationMs: Long = 0L,
+    val shuffle: Boolean = false,
+    val repeat: RepeatMode = RepeatMode.OFF,
+    val sleepTimer: SleepTimer? = null,
+) {
+    val current: QueueItem? get() = queue.getOrNull(currentIndex)
+    val hasQueue: Boolean get() = queue.isNotEmpty()
+    val isPlaying: Boolean get() = status == PlayerStatus.PLAYING || status == PlayerStatus.BUFFERING
+}
+
+enum class SkipReason { UNAVAILABLE, NETWORK, OTHER }
+
+sealed interface PlayerMessage {
+    data class TrackSkipped(val title: String, val reason: SkipReason) : PlayerMessage
+    data object TooManyFailures : PlayerMessage
+    data class QueueWindowed(val queued: Int, val total: Int) : PlayerMessage
+    data class QueueFull(val dropped: Int) : PlayerMessage
+}
+
+internal fun PlaybackState.toUi() = PlayerUiState(
+    queue = queue, currentIndex = currentIndex,
+    status = when (status) {
+        PlaybackStatus.Idle -> PlayerStatus.IDLE
+        PlaybackStatus.Buffering -> PlayerStatus.BUFFERING
+        PlaybackStatus.Playing -> PlayerStatus.PLAYING
+        PlaybackStatus.Paused -> PlayerStatus.PAUSED
+        PlaybackStatus.WaitingForNetwork -> PlayerStatus.WAITING_FOR_NETWORK
+        is PlaybackStatus.Error -> PlayerStatus.ERROR
+    },
+    durationMs = durationMs, shuffle = shuffle, repeat = repeat, sleepTimer = sleepTimer,
+)
+
+internal fun PlaybackEvent.toMessage(): PlayerMessage = when (this) {
+    is PlaybackEvent.Skipped -> PlayerMessage.TrackSkipped(
+        track.title,
+        when (reason) { "unavailable" -> SkipReason.UNAVAILABLE; "network error" -> SkipReason.NETWORK; else -> SkipReason.OTHER },
+    )
+    is PlaybackEvent.Stopped -> PlayerMessage.TooManyFailures
+}
