@@ -14,12 +14,21 @@ import app.aria.domain.AppSettings
 import app.aria.domain.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.retryWhen
 import java.io.File
 import java.io.IOException
 
-/** A corrupt settings file is replaced by defaults; settings are never worth a crash. */
+/**
+ * A corrupt settings file is replaced by defaults; settings are never worth a crash.
+ *
+ * Contract (DataStore allows only one live instance per file, and a second one throws on first use):
+ * - create exactly one instance per [file] and keep it for the whole app lifetime (an app-level singleton);
+ * - [scope] must be app-lifetime too, in the app `SupervisorJob() + Dispatchers.IO`; never cancel it while the app runs;
+ * - [file] must live under `filesDir/datastore/`, the only directory the backup rules exclude from cloud backup and device transfer.
+ */
 fun createSettingsDataStore(file: File, scope: CoroutineScope): DataStore<Preferences> =
     PreferenceDataStoreFactory.create(
         corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
@@ -28,6 +37,8 @@ fun createSettingsDataStore(file: File, scope: CoroutineScope): DataStore<Prefer
     )
 
 class DataStoreSettingsRepository(private val store: DataStore<Preferences>) : SettingsRepository {
+    private companion object { const val RETRY_DELAY_MS = 1_000L }
+
     private object Keys {
         val historyThresholdMs = longPreferencesKey("history_threshold_ms")
         val endlessRadio = booleanPreferencesKey("endless_radio")
@@ -37,11 +48,20 @@ class DataStoreSettingsRepository(private val store: DataStore<Preferences>) : S
         val onboardingDone = booleanPreferencesKey("onboarding_done")
     }
 
+    /** A read failure emits defaults and then retries, so the flow never completes because of an IOException. */
     override val settings: Flow<AppSettings> = store.data
-        .catch { e -> if (e is IOException) emit(emptyPreferences()) else throw e }
+        .retryWhen { e, _ ->
+            if (e is IOException) { emit(emptyPreferences()); delay(RETRY_DELAY_MS); true } else false
+        }
         .map { it.toSettings() }
+        .distinctUntilChanged()
 
+    /** A storage failure (IOException) drops the write; settings are never worth a crash. */
     override suspend fun update(transform: (AppSettings) -> AppSettings) {
+        try { write(transform) } catch (_: IOException) { }
+    }
+
+    private suspend fun write(transform: (AppSettings) -> AppSettings) {
         store.edit { p ->
             val next = transform(p.toSettings()).normalized()
             p[Keys.historyThresholdMs] = next.historyThresholdMs

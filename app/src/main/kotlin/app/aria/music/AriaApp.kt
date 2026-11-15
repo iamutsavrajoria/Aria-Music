@@ -4,6 +4,8 @@ package app.aria.music
 import android.app.Application
 import android.os.Build
 import app.aria.core.crash.CrashReportFormatter
+import app.aria.music.player.EngineSettingsApplier
+import app.aria.music.player.PlayerController
 import app.aria.playback.AriaPlaybackService
 import app.aria.playback.DefaultPlaybackEngine
 import app.aria.playback.PlaybackEngineProvider
@@ -16,6 +18,9 @@ import javax.inject.Inject
 @HiltAndroidApp
 class AriaApp : Application(), PlaybackEngineProvider {
     @Inject lateinit var engine: DefaultPlaybackEngine
+    @Inject lateinit var settingsApplier: EngineSettingsApplier
+    // Injected here because the controller is a lazy singleton: instantiating it at startup means early engine events are not lost.
+    @Inject lateinit var playerController: PlayerController
     override val playbackEngine: DefaultPlaybackEngine get() = engine
 
     override fun onCreate() {
@@ -33,6 +38,7 @@ class AriaApp : Application(), PlaybackEngineProvider {
         }
         // Transport commands after a restore or an idle stop find no service; this starts it (the UI's own start is harmless alongside).
         engine.serviceStarter = { AriaPlaybackService.start(this) }
+        settingsApplier.start()
         MainScope().launch { engine.restore() }
     }
 }

@@ -26,5 +26,6 @@ data class AppSettings(
 interface SettingsRepository {
     /** Emits the stored settings (defaults when nothing is stored), already normalized. */
     val settings: Flow<AppSettings>
+    /** Applies [transform] to the stored settings (normalized). Storage failures never throw; a failed write is dropped. */
     suspend fun update(transform: (AppSettings) -> AppSettings)
 }
