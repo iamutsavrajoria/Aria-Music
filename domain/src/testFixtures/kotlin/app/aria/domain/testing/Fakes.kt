@@ -141,3 +141,16 @@ class FakePlaylistRepository : PlaylistRepository {
         p.rows.clear(); p.rows.addAll(orderedEntryIds.map { byId.getValue(it) }); bump()
     }
 }
+
+class FakeHomeShelfCache : HomeShelfCache {
+    val state = MutableStateFlow<CachedHome?>(null)
+    var replaceCalls = 0
+    override fun observe(): Flow<CachedHome?> = state
+    override suspend fun replace(shelves: List<Shelf>, fetchedAtEpochMs: Long) { replaceCalls++; state.value = CachedHome(shelves, fetchedAtEpochMs) }
+}
+
+class FakeHomeLocalSource : HomeLocalSource {
+    val quick = MutableStateFlow<List<Track>>(emptyList()); val recent = MutableStateFlow<List<Track>>(emptyList())
+    override fun quickPicks(limit: Int): Flow<List<Track>> = quick
+    override fun recentlyPlayed(limit: Int): Flow<List<Track>> = recent
+}
