@@ -7,6 +7,7 @@ import app.aria.domain.HomeShelfCache
 import app.aria.domain.Shelf
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import java.util.Locale
 
 class HomeShelfCacheImpl(private val dao: HomeShelfCacheDao) : HomeShelfCache {
     override fun observe(): Flow<CachedHome?> = dao.observe().map { rows ->
@@ -14,7 +15,7 @@ class HomeShelfCacheImpl(private val dao: HomeShelfCacheDao) : HomeShelfCache {
         val decoded = rows.map { it to ShelfJsonCodec.decode(it.payload) }
         if (decoded.any { it.second == null }) {
             // Decision 3: an undecodable row means the cache is from an incompatible build or damaged; drop it all and refetch.
-            dao.delete(rows.map { it.shelfKey })
+            dao.clearIfUnchanged(rows) // no-op if a replace() already landed
             return@map null
         }
         CachedHome(decoded.map { it.second!! }, rows.minOf { it.fetchedAtEpochMs })
@@ -22,6 +23,6 @@ class HomeShelfCacheImpl(private val dao: HomeShelfCacheDao) : HomeShelfCache {
 
     /** Slot keys are positional ("yt:00", "yt:01", ...), so they are unique per call whatever the shelf titles are. */
     override suspend fun replace(shelves: List<Shelf>, fetchedAtEpochMs: Long) {
-        dao.replaceAll(shelves.mapIndexed { i, s -> HomeShelfCacheEntity("yt:%02d".format(i), i, ShelfJsonCodec.encode(s), fetchedAtEpochMs) })
+        dao.replaceAll(shelves.mapIndexed { i, s -> HomeShelfCacheEntity(String.format(Locale.ROOT, "yt:%02d", i), i, ShelfJsonCodec.encode(s), fetchedAtEpochMs) })
     }
 }

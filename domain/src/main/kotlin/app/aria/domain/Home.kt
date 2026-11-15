@@ -52,7 +52,10 @@ class DefaultHomeRepository(
 
     override suspend fun needsRevalidation(): Boolean {
         val c = cache.observe().first() ?: return true
-        return clock() - c.fetchedAtEpochMs > REVALIDATE_AFTER_MS
+        val age = clock() - c.fetchedAtEpochMs
+        // A negative age (fetched "in the future", e.g. the clock moved back) cannot be trusted: treat it as stale.
+        // Exactly REVALIDATE_AFTER_MS old is still fresh (exclusive boundary).
+        return age < 0 || age > REVALIDATE_AFTER_MS
     }
 
     override suspend fun refresh(): Result<HomeRefresh> {

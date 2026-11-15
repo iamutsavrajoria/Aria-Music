@@ -48,4 +48,23 @@ class HomeShelfCacheImplTest {
         assertNull(cache.observe().first())
         assertTrue(db.homeShelfCacheDao().observe().first().isEmpty())
     }
+
+    @Test fun lateCorruptDropDoesNotWipeANewerReplace() = runBlocking {
+        val dao = db.homeShelfCacheDao()
+        cache.replace(listOf(shelf("A")), 500L)
+        val corrupt = dao.observe().first() + HomeShelfCacheEntity("yt:09", 9, "garbage", 500L)
+        dao.replaceAll(corrupt)
+        val seenByReader = dao.observe().first()
+        cache.replace(listOf(shelf("Fresh")), 900L) // reuses slot key yt:00 while the reader is still deciding
+        assertFalse(dao.clearIfUnchanged(seenByReader))
+        assertEquals(listOf("Fresh"), cache.observe().first()!!.shelves.map { it.title })
+    }
+
+    @Test fun replaceAllRollsBackWhenInsertFails() = runBlocking {
+        val dao = db.homeShelfCacheDao()
+        cache.replace(listOf(shelf("Keep")), 500L)
+        val dup = listOf(HomeShelfCacheEntity("k", 0, "x", 1L), HomeShelfCacheEntity("k", 1, "y", 1L))
+        try { dao.replaceAll(dup); fail("expected constraint failure") } catch (e: Exception) { /* expected */ }
+        assertEquals(listOf("Keep"), cache.observe().first()!!.shelves.map { it.title })
+    }
 }
