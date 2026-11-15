@@ -47,6 +47,7 @@ android {
         }
         debug { applicationIdSuffix = ".debug" }
     }
+    testOptions { unitTests.isIncludeAndroidResources = true }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
         targetCompatibility = JavaVersion.VERSION_21
@@ -87,4 +88,9 @@ dependencies {
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.lifecycle.runtime.compose)
     implementation(libs.kotlinx.serialization.json)
+    testImplementation(kotlin("test-junit"))
+    testImplementation(libs.junit)
+    testImplementation(libs.coroutines.test)
+    testImplementation(testFixtures(project(":domain")))
+    androidTestImplementation(testFixtures(project(":domain")))
 }
