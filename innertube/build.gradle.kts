@@ -35,9 +35,11 @@ tasks.withType<Test>().configureEach {
 tasks.withType<Test>().configureEach {
     // A capture run must never be skipped as up-to-date.
     if (providers.gradleProperty("captureFixtures").orNull == "true") outputs.upToDateWhen { false }
-    onOutput { descriptor, event ->
-        if (descriptor.className == "app.aria.innertube.fixtures.FixtureFreshnessTest") logger.lifecycle(event.message.trimEnd())
-    }
+    addTestOutputListener(object : org.gradle.api.tasks.testing.TestOutputListener {
+        override fun onOutput(descriptor: org.gradle.api.tasks.testing.TestDescriptor, event: org.gradle.api.tasks.testing.TestOutputEvent) {
+            if (descriptor.className == "app.aria.innertube.fixtures.FixtureFreshnessTest") logger.lifecycle(event.message.trimEnd())
+        }
+    })
 }
 
 dependencies {
