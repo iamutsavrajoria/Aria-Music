@@ -11,6 +11,7 @@
         <exclude domain="sharedpref" path="resume.xml" />
         <exclude domain="file" path="crash/" />
         <exclude domain="file" path="datastore/" />
+        <exclude domain="root" path="cache/image_cache/" />
     </cloud-backup>
     <device-transfer>
         <exclude domain="file" path="secure/" />
@@ -22,5 +23,6 @@
         <exclude domain="sharedpref" path="resume.xml" />
         <exclude domain="file" path="crash/" />
         <exclude domain="file" path="datastore/" />
+        <exclude domain="root" path="cache/image_cache/" />
     </device-transfer>
 </data-extraction-rules>

@@ -16,4 +16,5 @@
     <exclude domain="sharedpref" path="resume.xml" />
     <exclude domain="file" path="crash/" />
     <exclude domain="file" path="datastore/" />
+    <exclude domain="root" path="cache/image_cache/" />
 </full-backup-content>

@@ -24,6 +24,7 @@ REQUIRED = [
     ("sharedpref", "resume.xml"),   # playback resume position
     ("file", "crash/"),             # crash reports
     ("file", "datastore/"),         # app settings (DataStore)
+    ("root", "cache/image_cache/"), # artwork disk cache (Android never backs up cache/; stated explicitly)
 ]
 
 
