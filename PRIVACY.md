@@ -7,6 +7,8 @@ When you search or play music, the app contacts YouTube Music to do it. That req
 
 The text you type in the search box is sent to YouTube Music for suggestions as you type, and Home and the album, artist and playlist pages request your region's feed from YouTube Music.
 
+Artwork (album covers, thumbnails) is loaded directly from Google's image servers, which see your IP address. Images are cached on your device (100 MB cap, not included in Android backup).
+
 If the app crashes it writes a report to a file on your device, and nothing is sent anywhere. The in-app viewer for that report is not built yet, so for now the file is not shown in the app. Tokens, cookies, authorization headers and the query string of every URL are removed before the report is written.
 
 Android backup and device transfer do not include Aria's data: the library database, playback position, saved sign-in tokens and crash reports are all excluded, so none of it is copied to Google's cloud backup or to a new phone. A user-controlled backup and restore is planned and will be opt-in.

@@ -22,4 +22,7 @@ object UiModule {
 
     @Provides @Singleton
     fun serviceLauncher(@ApplicationContext c: Context): ServiceLauncher = ServiceLauncher { AriaPlaybackService.start(c) }
+
+    @Provides @Singleton
+    fun imageLoader(@ApplicationContext c: Context): coil3.ImageLoader = app.aria.music.image.AriaImageLoader.create(c)
 }
