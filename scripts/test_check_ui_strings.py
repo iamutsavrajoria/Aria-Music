@@ -9,7 +9,7 @@ KT = "app/src/main/kotlin/app/aria/music/ui/Screen.kt"
 def put(root, rel, text):
     p = root / rel
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text)
+    p.write_text(text, encoding="utf-8")
 
 
 def run(root):
@@ -89,3 +89,62 @@ def test_real_baseline_contains_only_player_screen():
     entries = [l.strip() for l in (ROOT / "scripts" / "ui-strings-baseline.txt").read_text().splitlines()
                if l.strip() and not l.startswith("#")]
     assert entries == ["app/src/main/kotlin/app/aria/music/PlayerScreen.kt"], entries
+
+
+def test_escape_requires_a_non_empty_reason(tmp_path):
+    for tail in ["// ui-string-ok:", "// ui-string-ok:   ", "// ui-string-ok"]:
+        code, out = flagged(tmp_path, f'Text("Debug") {tail}\n')
+        assert code == 1, (tail, out)
+
+
+def test_escape_token_inside_a_string_does_not_count(tmp_path):
+    for body in ['Text("Debug // ui-string-ok: nope")', 'Text("Debug ui-string-ok: nope")',
+                 'Text("a") ; val s = "// ui-string-ok: x" ; Text("Debug")']:
+        code, out = flagged(tmp_path, body + "\n")
+        assert code == 1, (body, out)
+
+
+def test_escape_must_be_a_line_comment_after_the_code(tmp_path):
+    for body in ['/* ui-string-ok: x */ Text("Debug")', '// ui-string-ok: x Text("Debug")']:
+        code, out = flagged(tmp_path, body + "\n")
+        assert code == 1, (body, out)
+
+
+def test_escape_with_reason_still_works_after_code_with_urls_in_strings(tmp_path):
+    code, out = flagged(tmp_path, 'Text("Debug") // ui-string-ok: dev label\n')
+    assert code == 0, out
+    code, out = flagged(tmp_path, 'Text("Debug", x = "http://a") // ui-string-ok: dev label\n')
+    assert code == 0, out
+
+
+def test_real_repo_escape_uses_are_pinned_to_the_canary():
+    hits = []
+    for f in (ROOT / "app").rglob("*.kt"):
+        for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+            if "ui-string-ok" in line:
+                hits.append(f.relative_to(ROOT).as_posix())
+    assert hits == ["app/src/main/kotlin/app/aria/music/Canary.kt"], hits
+
+
+def test_non_ascii_letters_count(tmp_path):
+    for body in ['Text("é")', 'Text("日本語")', 'Text("Привет")', 'Text("ñ")']:
+        code, out = flagged(tmp_path, body + "\n")
+        assert code == 1, (body, out)
+
+
+def test_non_letter_symbols_still_pass(tmp_path):
+    code, out = flagged(tmp_path, 'Text("•")\nText("→")\nText("12")\nText("😀")\n')
+    assert code == 0, out
+
+
+def test_space_before_paren_is_flagged(tmp_path):
+    for body in ['Text ("x")', 'Text  (\n "x")', 'Text (text = "x")', 'host.showSnackbar ("x")']:
+        code, out = flagged(tmp_path, body + "\n")
+        assert code == 1, (body, out)
+
+
+def test_utf8_files_are_read_regardless_of_locale(tmp_path):
+    put(tmp_path, KT, '// ünïcode comment\nText(stringResource(R.string.x))\n')
+    p = subprocess.run(["bash", str(SCRIPT), str(tmp_path)], capture_output=True, text=True,
+                       env={"PATH": "/usr/bin:/bin", "LC_ALL": "C", "PYTHONUTF8": "0", "PYTHONCOERCECLOCALE": "0"})
+    assert p.returncode == 0, p.stdout + p.stderr

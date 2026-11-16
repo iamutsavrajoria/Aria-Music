@@ -3923,6 +3923,7 @@ class MainActivity : ComponentActivity() {
 ```
 
   and change the `playback-service` script to `scripts/ci-gradle.sh :playback:connectedDebugAndroidTest :app:connectedFossDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.notPackage=app.aria.music.ui`. If `package=` does not include sub-packages on the runner in use, list the sub-packages comma-separated.
+- [ ] **Step 4a (added by controller, Task 10 review):** Delete `app/src/main/kotlin/app/aria/music/Canary.kt` and its `ui-string-ok` escape (grep for `Canary` and `ui-string-ok` must find nothing outside docs/plan). The `ui-string-ok` count test must then pin zero uses.
 - [ ] **Step 4:** Push; iterate until `verify`, `app-ui` (API 26, 34) and `playback-service` are green. **Commit** `feat(app): navigation shell, theme, shared states and message host`.
 
 ---
