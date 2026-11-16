@@ -75,3 +75,17 @@ def test_stale_baseline_entries_fail(tmp_path):
 def test_real_repo_passes():
     code, out = run(ROOT)
     assert code == 0, out
+
+
+def test_new_violation_fails_even_with_baseline_present(tmp_path):
+    put(tmp_path, "app/src/main/kotlin/Legacy.kt", 'Text("Old")\n')
+    put(tmp_path, "app/src/main/kotlin/New.kt", 'Text("Fresh")\n')
+    put(tmp_path, "scripts/ui-strings-baseline.txt", "app/src/main/kotlin/Legacy.kt\n")
+    code, out = run(tmp_path)
+    assert code == 1 and "New.kt" in out and "Legacy.kt" not in out, out
+
+
+def test_real_baseline_contains_only_player_screen():
+    entries = [l.strip() for l in (ROOT / "scripts" / "ui-strings-baseline.txt").read_text().splitlines()
+               if l.strip() and not l.startswith("#")]
+    assert entries == ["app/src/main/kotlin/app/aria/music/PlayerScreen.kt"], entries

@@ -119,7 +119,7 @@ fun CanaryScreen(viewModel: CanaryViewModel = hiltViewModel(), nav: NavHostContr
     NavHost(nav, startDestination = CanaryRoute, modifier = Modifier.padding(0.dp)) {
         composable<CanaryRoute> {
             PullToRefreshBox(isRefreshing = refreshing, onRefresh = { refreshing = false }) {
-                Box(Modifier.testTag("canary").semantics { contentDescription = "x" }) {
+                Box(Modifier.testTag("canary").semantics { contentDescription = "x" }) { // ui-string-ok: throwaway compile canary, removed in Task 12
                     Text("$count $onTop")
                     AsyncImage(model = "https://i.ytimg.com/x.jpg", contentDescription = null, imageLoader = loader, modifier = Modifier, contentScale = ContentScale.Crop)
                 }

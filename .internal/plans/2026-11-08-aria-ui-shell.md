@@ -6451,3 +6451,6 @@ Region-specific error wording; API 26-only failures are found at slice boundarie
 
 ### Controller note: Task 8 review (CI green b74903e; fix b4cd30d)
 - Fixed: controller's launcher.start() is now runCatching-guarded. Open minors: message channel is BUFFERED(64) with trySend (stale toasts possible, single consumer); the controller is a lazy singleton, so Task 12's shell MUST inject it at startup or early engine events are lost; `WAITING_FOR_NETWORK` toggle cannot pause (check in Task 14 UI); PlaybackStatus.Error detail dropped to bare ERROR.
+
+### Controller note: Task 9 review (PASS, CI green 17191e9)
+- Minors: legacy PlayerScreen toggles are session-only and will be overwritten by stored values once any setting is written (resolved when Task 12/14 remove the legacy screen; Task 21 must write endlessRadio/skipSilence/loudness through SettingsRepository). Applier has no exception guard and `start()` is not idempotent. On a read IOException defaults briefly reach the engine. No test covers AriaApp.onCreate or a duplicate-DataStore in future androidTests (cancel the DataStore scope in test teardown).

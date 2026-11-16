@@ -27,6 +27,8 @@ jobs:
           scripts/check-no-destructive-migration.sh
           scripts/check-actions-pinned.sh
           scripts/check-webview-safety.sh
+          scripts/check-ui-strings.sh
+          scripts/check-screen-imports.sh
           if git grep -nE 'ZemerTeam|raw\.githubusercontent\.com' -- . ':!docs' ':!.internal' ':!*.csv' ':!*.md' ':!.github'; then echo "Dependence on another project's server found"; exit 1; fi
           # TODO (controller): add `test -f gradle/verification-metadata.xml` here once the file is committed (Step 5b.4).
       - name: Build-logic tests (module-graph rules)

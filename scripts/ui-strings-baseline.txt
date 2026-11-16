@@ -1,0 +1,2 @@
+# Legacy files exempt from check-ui-strings.sh. Entries may only be removed. Task 16 deletes the last one.
+app/src/main/kotlin/app/aria/music/PlayerScreen.kt
