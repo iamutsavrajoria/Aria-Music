@@ -117,13 +117,13 @@ def test_escape_with_reason_still_works_after_code_with_urls_in_strings(tmp_path
     assert code == 0, out
 
 
-def test_real_repo_escape_uses_are_pinned_to_the_canary():
+def test_real_repo_has_no_escape_uses():
     hits = []
     for f in (ROOT / "app").rglob("*.kt"):
         for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
             if "ui-string-ok" in line:
-                hits.append(f.relative_to(ROOT).as_posix())
-    assert hits == ["app/src/main/kotlin/app/aria/music/Canary.kt"], hits
+                hits.append(f"{f.relative_to(ROOT).as_posix()}:{n}")
+    assert hits == [], hits
 
 
 def test_non_ascii_letters_count(tmp_path):
