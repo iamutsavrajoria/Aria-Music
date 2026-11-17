@@ -15,8 +15,9 @@ import java.util.Locale
 @Composable
 fun AriaTestTheme(pseudo: Boolean = false, fontScale: Float = 1f, content: @Composable () -> Unit) {
     val base = LocalContext.current
-    val cfg = remember(pseudo, fontScale) {
-        Configuration(base.resources.configuration).apply { if (pseudo) setLocale(Locale.forLanguageTag("en-XA")); this.fontScale = fontScale }
+    val baseCfg = LocalConfiguration.current
+    val cfg = remember(baseCfg, pseudo, fontScale) {
+        Configuration(baseCfg).apply { if (pseudo) setLocale(Locale.forLanguageTag("en-XA")); this.fontScale = fontScale }
     }
     val ctx = remember(cfg) { base.createConfigurationContext(cfg) }
     CompositionLocalProvider(
