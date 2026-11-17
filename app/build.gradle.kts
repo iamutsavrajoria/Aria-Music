@@ -45,7 +45,11 @@ android {
             isMinifyEnabled = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
-        debug { applicationIdSuffix = ".debug" }
+        debug {
+            applicationIdSuffix = ".debug"
+            // en-XA (long accented strings) and ar-XB (mirrored) for layout checks; never in release.
+            isPseudoLocalesEnabled = true
+        }
     }
     testOptions { unitTests.isIncludeAndroidResources = true }
     compileOptions {
@@ -95,4 +99,7 @@ dependencies {
     testImplementation(libs.androidx.test.core)
     testImplementation(testFixtures(project(":domain")))
     androidTestImplementation(testFixtures(project(":domain")))
+    androidTestImplementation(libs.compose.ui.test.junit4)
+    // Supplies the empty host activity that createComposeRule launches.
+    debugImplementation(libs.compose.ui.test.manifest)
 }

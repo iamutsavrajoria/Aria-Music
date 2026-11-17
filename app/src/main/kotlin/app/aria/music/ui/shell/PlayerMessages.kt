@@ -1,0 +1,22 @@
+// SPDX-License-Identifier: GPL-3.0-only
+package app.aria.music.ui.shell
+
+import android.content.res.Resources
+import app.aria.music.R
+import app.aria.music.player.PlayerMessage
+import app.aria.music.player.SkipReason
+import app.aria.music.ui.Formatters
+
+fun PlayerMessage.text(r: Resources): String = when (this) {
+    is PlayerMessage.TrackSkipped -> r.getString(
+        when (reason) {
+            SkipReason.UNAVAILABLE -> R.string.msg_skipped_unavailable
+            SkipReason.NETWORK -> R.string.msg_skipped_network
+            SkipReason.OTHER -> R.string.msg_skipped_other
+        },
+        title,
+    )
+    PlayerMessage.TooManyFailures -> r.getString(R.string.msg_too_many_failures)
+    is PlayerMessage.QueueWindowed -> r.getString(R.string.msg_queue_windowed, Formatters.count(queued), Formatters.count(total))
+    is PlayerMessage.QueueFull -> r.getQuantityString(R.plurals.msg_queue_full, dropped, dropped)
+}
