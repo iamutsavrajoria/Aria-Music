@@ -2,6 +2,7 @@
 package app.aria.music.image
 
 import android.content.Context
+import app.aria.domain.ImageUrlPolicy
 import app.aria.music.BuildConfig
 import coil3.ImageLoader
 import coil3.SingletonImageLoader

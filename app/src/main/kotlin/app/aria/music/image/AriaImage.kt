@@ -9,6 +9,7 @@ import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.ContentScale
+import app.aria.domain.ImageUrlPolicy
 import coil3.ImageLoader
 import coil3.compose.AsyncImage
 
