@@ -24,6 +24,7 @@ Unchecked boxes are open. Source: the foundation and playback-core design specs 
 - [ ] Kyant0/backdrop upstream `NOTICE` file checked (copy to `licenses/NOTICE` if it exists). `licenses/Apache-2.0.txt` is present.
 - [ ] Privacy policy matches `docs/data-flow.md` for every provider shipped.
 - [ ] Room schema frozen; every change after this needs a tested migration.
+- [ ] Notification/lock-screen artwork host allowlist and redirects: the artwork URL given to Media3 is checked against `ImageUrlPolicy` before it is set, but Media3 loads it and follows its redirects itself, so a redirect from an allowed host to another host is not gated. Close by supplying a bitmap loaded through the policy loader (`setArtworkData`) or a gated bitmap loader on the session, then remove this line.
 - [ ] Registry public keys: only throwaway test keys exist (generated inside the verifier tests). No production keys are embedded and the app does not fetch a registry. Generate the two production keys, embed the public halves, and store the private halves outside the repo, before any registry is served.
 
 ## Before v1.0

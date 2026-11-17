@@ -15,6 +15,7 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.ResolvingDataSource
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import app.aria.domain.ImageUrlPolicy
 import app.aria.domain.PlayerListener
 import app.aria.domain.PlayerOutput
 import app.aria.domain.QueueItem
@@ -75,7 +76,7 @@ class Media3PlayerOutput(
         .setMediaMetadata(
             MediaMetadata.Builder()
                 .setTitle(q.track.title).setArtist(q.track.artists.joinToString())
-                .setArtworkUri(q.track.thumbnailUrl?.takeIf { StreamUrlPolicy.isAllowed(it, false) }?.let { Uri.parse(it) })
+                .setArtworkUri(q.track.thumbnailUrl?.takeIf { ImageUrlPolicy.isAllowed(it) }?.let { Uri.parse(it) })
                 .setIsPlayable(true).setIsBrowsable(false)
                 .build(),
         ).build()
