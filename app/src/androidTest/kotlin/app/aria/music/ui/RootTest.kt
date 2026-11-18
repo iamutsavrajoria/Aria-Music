@@ -4,7 +4,6 @@ package app.aria.music.ui
 import androidx.compose.material3.Text
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.platform.app.InstrumentationRegistry
@@ -31,25 +30,33 @@ class RootTest {
     private val controller = PlayerController(engine, { }, CoroutineScope(SupervisorJob() + Dispatchers.Unconfined))
 
     private fun skipped(title: String, reason: String) = PlaybackEvent.Skipped(Samples.track(1, title), reason)
-    private fun textShown(text: String) = rule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
 
+    // The snackbar times out on the test clock, so the clock is stepped by hand instead of letting idle-waiting run it past the timeout.
     @Test fun anEngineEventShowsAsASnackbar() {
+        rule.mainClock.autoAdvance = false
         rule.setContent { AriaTestTheme { AriaRoot(legacySearch = { Text("SEARCH") }, controller = controller) } }
         engine.mutableEvents.tryEmit(skipped("Zed", "unavailable"))
-        val expected = target.getString(R.string.msg_skipped_unavailable, "Zed")
-        rule.waitUntil(5_000) { textShown(expected) }
-        rule.onNodeWithText(expected).assertIsDisplayed()
+        rule.mainClock.advanceTimeBy(1_500)
+        rule.onNodeWithText(target.getString(R.string.msg_skipped_unavailable, "Zed")).assertIsDisplayed()
     }
 
     @Test fun aNewerMessageReplacesTheOneOnScreenEvenWhenBothArriveAtOnce() {
+        rule.mainClock.autoAdvance = false
         rule.setContent { AriaTestTheme { AriaRoot(legacySearch = { Text("SEARCH") }, controller = controller) } }
-        val older = target.getString(R.string.msg_skipped_unavailable, "Old")
-        val newer = target.getString(R.string.msg_skipped_network, "New")
         engine.mutableEvents.tryEmit(skipped("Old", "unavailable")); engine.mutableEvents.tryEmit(skipped("New", "network error"))
-        rule.waitUntil(5_000) { textShown(newer) }
-        rule.waitForIdle()
-        rule.onNodeWithText(newer).assertIsDisplayed()
-        rule.onNodeWithText(older).assertDoesNotExist()
+        rule.mainClock.advanceTimeBy(1_500)
+        rule.onNodeWithText(target.getString(R.string.msg_skipped_network, "New")).assertIsDisplayed()
+        rule.onNodeWithText(target.getString(R.string.msg_skipped_unavailable, "Old")).assertDoesNotExist()
+    }
+
+    @Test fun aNewerMessageReplacesOneAlreadyOnScreen() {
+        rule.mainClock.autoAdvance = false
+        rule.setContent { AriaTestTheme { AriaRoot(legacySearch = { Text("SEARCH") }, controller = controller) } }
+        engine.mutableEvents.tryEmit(skipped("Old", "unavailable")); rule.mainClock.advanceTimeBy(1_000)
+        rule.onNodeWithText(target.getString(R.string.msg_skipped_unavailable, "Old")).assertIsDisplayed()
+        engine.mutableEvents.tryEmit(skipped("New", "network error")); rule.mainClock.advanceTimeBy(1_500)
+        rule.onNodeWithText(target.getString(R.string.msg_skipped_network, "New")).assertIsDisplayed()
+        rule.onNodeWithText(target.getString(R.string.msg_skipped_unavailable, "Old")).assertDoesNotExist()
     }
 
     @Test fun permissionDialogButtonsReportAllowAndNotNow() {
