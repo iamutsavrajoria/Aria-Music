@@ -3,6 +3,7 @@ package app.aria.music.ui
 
 import android.content.Context
 import android.content.res.Configuration
+import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
@@ -29,7 +30,10 @@ fun AriaTestTheme(pseudo: Boolean = false, fontScale: Float = 1f, content: @Comp
         Configuration(baseCfg).apply { if (pseudo) setLocale(Locale.forLanguageTag("en-XA")); this.fontScale = fontScale }
     }
     val ctx = remember(cfg) { base.createConfigurationContext(cfg) }
+    // The default owner is found by walking LocalContext to the Activity; the wrapped context hides it, so keep the real one.
+    val registryOwner = LocalActivityResultRegistryOwner.current
     CompositionLocalProvider(
+        *listOfNotNull(registryOwner?.let { LocalActivityResultRegistryOwner provides it }).toTypedArray(),
         LocalContext provides ctx, LocalConfiguration provides cfg, LocalResources provides ctx.resources,
         LocalDensity provides Density(ctx.resources.displayMetrics.density, fontScale),
     ) { AriaTheme(dynamic = false, content = content) }
