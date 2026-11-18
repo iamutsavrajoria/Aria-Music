@@ -32,6 +32,7 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import app.aria.music.player.PlayerController
 import app.aria.music.player.PlayerMessage
+import app.aria.music.ui.miniplayer.MiniPlayerHost
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
@@ -43,13 +44,14 @@ fun AriaShellContent(
     onSelect: (TopLevel) -> Unit,
     snackbarHost: SnackbarHostState,
     miniPlayer: @Composable () -> Unit,
+    miniPlayerVisible: Boolean = true,
     content: @Composable (PaddingValues) -> Unit,
 ) {
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHost) },
         bottomBar = {
             Column {
-                miniPlayer()
+                if (miniPlayerVisible) miniPlayer()
                 if (selected != null) {
                     NavigationBar {
                         TopLevel.entries.forEach { t ->
@@ -94,8 +96,15 @@ fun PlayerMessageHost(messages: Flow<PlayerMessage>, snackbar: SnackbarHostState
 @HiltViewModel
 class ShellViewModel @Inject constructor(val controller: PlayerController) : ViewModel()
 
+private val FULL_SCREEN_ROUTES = listOf(NowPlayingRoute::class, QueueRoute::class, SettingsRoute::class, OnboardingRoute::class)
+
 @Composable
-fun AriaRoot(legacySearch: @Composable () -> Unit, controller: PlayerController = hiltViewModel<ShellViewModel>().controller) {
+fun AriaRoot(
+    legacySearch: @Composable () -> Unit,
+    controller: PlayerController = hiltViewModel<ShellViewModel>().controller,
+    /** Overridable so tests without a Hilt activity can swap out the Hilt-backed mini player. */
+    miniPlayer: @Composable (onExpand: () -> Unit) -> Unit = { MiniPlayerHost(onExpand = it) },
+) {
     val nav = rememberNavController()
     val snackbar = remember { SnackbarHostState() }
     val ui by controller.ui.collectAsStateWithLifecycle()
@@ -104,10 +113,13 @@ fun AriaRoot(legacySearch: @Composable () -> Unit, controller: PlayerController 
     val entry by nav.currentBackStackEntryAsState()
     val dest = entry?.destination
     val selected = TopLevel.entries.firstOrNull { t -> dest?.hierarchy?.any { it.hasRoute(t.route::class) } == true }
+    // Full-screen routes own the whole screen: no bottom bar and no mini player.
+    val fullScreen = dest?.let { d -> FULL_SCREEN_ROUTES.any { d.hasRoute(it) } } == true
     AriaShellContent(
         selected = selected,
         onSelect = nav::navigateTopLevel,
         snackbarHost = snackbar,
-        miniPlayer = { /* Task 13 */ },
+        miniPlayer = { miniPlayer { nav.navigate(NowPlayingRoute) } },
+        miniPlayerVisible = !fullScreen,
     ) { padding -> AriaNavHost(nav, legacySearch, Modifier.padding(padding)) }
 }

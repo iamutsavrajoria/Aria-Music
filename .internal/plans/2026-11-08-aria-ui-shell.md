@@ -6455,3 +6455,9 @@ Region-specific error wording; API 26-only failures are found at slice boundarie
 
 ### Controller note: Task 9 review (PASS, CI green 17191e9)
 - Minors: legacy PlayerScreen toggles are session-only and will be overwritten by stored values once any setting is written (resolved when Task 12/14 remove the legacy screen; Task 21 must write endlessRadio/skipSilence/loudness through SettingsRepository). Applier has no exception guard and `start()` is not idempotent. On a read IOException defaults briefly reach the engine. No test covers AriaApp.onCreate or a duplicate-DataStore in future androidTests (cancel the DataStore scope in test teardown).
+
+### Controller note: Tasks 11 and 12 reviews (CI green 2aff989)
+- Task 13 MUST hide the mini player slot on full-screen routes (Now Playing, Queue, Settings, Onboarding): `AriaShellContent` renders `miniPlayer()` even when the bottom bar is hidden.
+- Reselecting the current tab is a no-op (no pop-to-root / scroll-to-top): Tasks 17/18 may add it. Mini-player progress must collect only `positionMs`.
+- Open: Media3 notification artwork redirect gap (release gate). `check-manifest-surface` (Task 24) must run against release or exempt debug ui-test-manifest. Debug-only: Timber DebugTree is planted (all existing Timber calls now show in debug logcat).
+- CI debugging tip: `gh api repos/.../actions/jobs/<id>/logs` works without a token for reading; ci-gradle.sh annotation "first exceptions" shows exception headers.

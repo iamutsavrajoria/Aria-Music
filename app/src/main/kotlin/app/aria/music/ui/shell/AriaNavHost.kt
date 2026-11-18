@@ -15,6 +15,7 @@ fun AriaNavHost(nav: NavHostController, legacySearch: @Composable () -> Unit, mo
     NavHost(nav, startDestination = HomeRoute, modifier = modifier) {
         composable<HomeRoute> { Placeholder(R.string.home_placeholder) }
         composable<SearchRoute> { legacySearch() }
+        composable<NowPlayingRoute> { Placeholder(R.string.now_playing_placeholder) } // replaced by Task 14
         composable<LibraryRoute> { Placeholder(R.string.library_placeholder) }
     }
 }

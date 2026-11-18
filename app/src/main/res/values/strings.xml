@@ -22,4 +22,13 @@
     <string name="notif_body">Android needs your permission to show the player in the notification shade and on the lock screen. Music plays either way.</string>
     <string name="notif_allow">Allow</string>
     <string name="notif_not_now">Not now</string>
+    <string name="action_play">Play</string>
+    <string name="action_pause">Pause</string>
+    <string name="action_next">Next</string>
+    <string name="action_previous">Previous</string>
+    <string name="mini_open_now_playing">Open now playing: %1$s</string>
+    <string name="state_playback_problem">Playback problem</string>
+    <string name="state_waiting_for_network">Waiting for network</string>
+    <string name="state_buffering">Buffering</string>
+    <string name="now_playing_placeholder">Now playing is coming soon.</string>
 </resources>

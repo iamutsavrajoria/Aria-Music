@@ -46,9 +46,9 @@ import org.junit.Test
 class ShellTest {
     @get:Rule val rule = createComposeRule()
 
-    private fun show(selected: TopLevel? = TopLevel.HOME, pseudo: Boolean = false, fontScale: Float = 1f, onSelect: (TopLevel) -> Unit = {}) = rule.setContent {
+    private fun show(selected: TopLevel? = TopLevel.HOME, miniVisible: Boolean = true, pseudo: Boolean = false, fontScale: Float = 1f, onSelect: (TopLevel) -> Unit = {}) = rule.setContent {
         AriaTestTheme(pseudo, fontScale) {
-            AriaShellContent(selected, onSelect, SnackbarHostState(), miniPlayer = { Text("MINI", modifier = Modifier.testTag("mini")) }) { Text("BODY") }
+            AriaShellContent(selected, onSelect, SnackbarHostState(), miniPlayer = { Text("MINI", modifier = Modifier.testTag("mini")) }, miniPlayerVisible = miniVisible) { Text("BODY") }
         }
     }
 
@@ -67,6 +67,8 @@ class ShellTest {
     }
 
     @Test fun barIsHiddenOnFullScreenRoutes() { show(selected = null); rule.onNodeWithTag("tab:HOME").assertDoesNotExist(); rule.onNodeWithText("BODY").assertIsDisplayed() }
+
+    @Test fun miniPlayerSlotIsHiddenWhenTheRouteIsFullScreen() { show(selected = null, miniVisible = false); rule.onNodeWithTag("mini").assertDoesNotExist(); rule.onNodeWithText("BODY").assertIsDisplayed() }
 
     @Test fun pseudolocaleActuallyChangesTheTabLabelsAndTheyStayVisibleAtDoubleFontScale() {
         val target = InstrumentationRegistry.getInstrumentation().targetContext

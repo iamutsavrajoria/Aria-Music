@@ -34,7 +34,7 @@ class RootTest {
     // The snackbar times out on the test clock, so the clock is stepped by hand instead of letting idle-waiting run it past the timeout.
     @Test fun anEngineEventShowsAsASnackbar() {
         rule.mainClock.autoAdvance = false
-        rule.setContent { AriaTestTheme { AriaRoot(legacySearch = { Text("SEARCH") }, controller = controller) } }
+        rule.setContent { AriaTestTheme { AriaRoot(legacySearch = { Text("SEARCH") }, controller = controller, miniPlayer = {}) } }
         engine.mutableEvents.tryEmit(skipped("Zed", "unavailable"))
         rule.mainClock.advanceTimeBy(1_500)
         rule.onNodeWithText(target.getString(R.string.msg_skipped_unavailable, "Zed")).assertIsDisplayed()
@@ -42,7 +42,7 @@ class RootTest {
 
     @Test fun aNewerMessageReplacesTheOneOnScreenEvenWhenBothArriveAtOnce() {
         rule.mainClock.autoAdvance = false
-        rule.setContent { AriaTestTheme { AriaRoot(legacySearch = { Text("SEARCH") }, controller = controller) } }
+        rule.setContent { AriaTestTheme { AriaRoot(legacySearch = { Text("SEARCH") }, controller = controller, miniPlayer = {}) } }
         engine.mutableEvents.tryEmit(skipped("Old", "unavailable")); engine.mutableEvents.tryEmit(skipped("New", "network error"))
         rule.mainClock.advanceTimeBy(1_500)
         rule.onNodeWithText(target.getString(R.string.msg_skipped_network, "New")).assertIsDisplayed()
@@ -51,7 +51,7 @@ class RootTest {
 
     @Test fun aNewerMessageReplacesOneAlreadyOnScreen() {
         rule.mainClock.autoAdvance = false
-        rule.setContent { AriaTestTheme { AriaRoot(legacySearch = { Text("SEARCH") }, controller = controller) } }
+        rule.setContent { AriaTestTheme { AriaRoot(legacySearch = { Text("SEARCH") }, controller = controller, miniPlayer = {}) } }
         engine.mutableEvents.tryEmit(skipped("Old", "unavailable")); rule.mainClock.advanceTimeBy(1_000)
         rule.onNodeWithText(target.getString(R.string.msg_skipped_unavailable, "Old")).assertIsDisplayed()
         engine.mutableEvents.tryEmit(skipped("New", "network error")); rule.mainClock.advanceTimeBy(1_500)
