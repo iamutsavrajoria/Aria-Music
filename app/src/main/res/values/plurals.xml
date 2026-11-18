@@ -2,7 +2,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 <resources>
     <plurals name="msg_queue_full">
-        <item quantity="one">%1$d song did not fit in the queue (limit 500)</item>
-        <item quantity="other">%1$d songs did not fit in the queue (limit 500)</item>
+        <item quantity="one">%1$d song did not fit in the queue (limit %2$s)</item>
+        <item quantity="other">%1$d songs did not fit in the queue (limit %2$s)</item>
     </plurals>
 </resources>

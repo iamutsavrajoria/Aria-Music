@@ -26,12 +26,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavDestination.Companion.hierarchy
+import androidx.navigation.NavController
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import app.aria.music.player.PlayerController
+import app.aria.music.player.PlayerMessage
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.collectLatest
 import javax.inject.Inject
 
 @Composable
@@ -66,6 +69,27 @@ fun AriaShellContent(
     )
 }
 
+/** Switches tabs keeping each tab's back stack and state (select Library, drill in, go Home, come back: Library is as it was). */
+fun NavController.navigateTopLevel(t: TopLevel) {
+    navigate(t.route) {
+        popUpTo(graph.findStartDestination().id) { saveState = true }
+        launchSingleTop = true
+        restoreState = true
+    }
+}
+
+/**
+ * Shows each player message as a snackbar. collectLatest cancels the snackbar on screen (which dismisses it) as soon as a newer message
+ * arrives, so the newest message always wins and an older one that has not been shown yet can never appear after it.
+ */
+@Composable
+fun PlayerMessageHost(messages: Flow<PlayerMessage>, snackbar: SnackbarHostState) {
+    val resources = LocalContext.current.resources
+    LaunchedEffect(messages) {
+        messages.collectLatest { message -> snackbar.showSnackbar(message.text(resources)) }
+    }
+}
+
 /** Holds the controller so the shell instantiates it at startup (it is a lazy singleton; early engine events must not be lost). */
 @HiltViewModel
 class ShellViewModel @Inject constructor(val controller: PlayerController) : ViewModel()
@@ -74,28 +98,15 @@ class ShellViewModel @Inject constructor(val controller: PlayerController) : Vie
 fun AriaRoot(legacySearch: @Composable () -> Unit, controller: PlayerController = hiltViewModel<ShellViewModel>().controller) {
     val nav = rememberNavController()
     val snackbar = remember { SnackbarHostState() }
-    val resources = LocalContext.current.resources
     val ui by controller.ui.collectAsStateWithLifecycle()
-    LaunchedEffect(controller) {
-        controller.messages.collect { message ->
-            // A newer message replaces the one on screen; collection continues while it shows.
-            snackbar.currentSnackbarData?.dismiss()
-            launch { snackbar.showSnackbar(message.text(resources)) }
-        }
-    }
+    PlayerMessageHost(controller.messages, snackbar)
     NotificationPermissionGate(hasQueue = ui.hasQueue)
     val entry by nav.currentBackStackEntryAsState()
     val dest = entry?.destination
     val selected = TopLevel.entries.firstOrNull { t -> dest?.hierarchy?.any { it.hasRoute(t.route::class) } == true }
     AriaShellContent(
         selected = selected,
-        onSelect = { t ->
-            nav.navigate(t.route) {
-                popUpTo(nav.graph.findStartDestination().id) { saveState = true }
-                launchSingleTop = true
-                restoreState = true
-            }
-        },
+        onSelect = nav::navigateTopLevel,
         snackbarHost = snackbar,
         miniPlayer = { /* Task 13 */ },
     ) { padding -> AriaNavHost(nav, legacySearch, Modifier.padding(padding)) }

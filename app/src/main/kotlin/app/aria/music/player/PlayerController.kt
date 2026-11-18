@@ -69,5 +69,5 @@ class PlayerController @Inject constructor(
     fun setSleepTimer(minutes: Int?) = engine.setSleepTimer(minutes?.let { it * 60_000L })
     fun setSleepAtEndOfTrack(on: Boolean) = engine.setSleepAtEndOfTrack(on)
 
-    private companion object { const val QUEUE_CAP = DefaultPlaybackEngine.QUEUE_CAP }
+    companion object { const val QUEUE_CAP = DefaultPlaybackEngine.QUEUE_CAP }
 }

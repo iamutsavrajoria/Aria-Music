@@ -5,6 +5,9 @@
 # Self-tested by scripts/test_check_image_loader.py.
 set -uo pipefail
 root="${1:-.}"
+if [ ! -d "$root" ] || [ ! -r "$root" ]; then
+  echo "FAIL: scan root '$root' is missing or unreadable"; exit 1
+fi
 fail=0
 pattern='SingletonImageLoader\.get\b|\.imageLoader\b|AsyncImage\(|rememberAsyncImagePainter'
 while IFS= read -r line; do
@@ -13,5 +16,5 @@ while IFS= read -r line; do
     */app/src/main/kotlin/app/aria/music/image/*) continue;;
   esac
   echo "FAIL: only app/.../music/image/ may use the default Coil loader or raw AsyncImage (use AriaImage): ${line#"$root"/}"; fail=1
-done < <(grep -rnE "$pattern" "$root" --include=*.kt --exclude-dir=build --exclude-dir=.git --exclude-dir=.internal 2>/dev/null)
+done < <(grep -rnE "$pattern" "$root" --include=*.kt --exclude-dir=build --exclude-dir=.git --exclude-dir=.internal)
 exit $fail

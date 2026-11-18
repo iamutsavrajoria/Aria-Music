@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package app.aria.music.ui
 
+import android.content.Context
 import android.content.res.Configuration
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -8,10 +9,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.unit.Density
 import java.util.Locale
 
-/** Test wrapper: optional en-XA pseudolocale (long accented strings) and font scale, on the app theme without dynamic color. */
+/** [base] with the en-XA pseudolocale (long accented strings) applied; its resources return the pseudolocalized strings. */
+fun pseudoContext(base: Context): Context =
+    base.createConfigurationContext(Configuration(base.resources.configuration).apply { setLocale(Locale.forLanguageTag("en-XA")) })
+
+/**
+ * Test wrapper: optional en-XA pseudolocale and font scale, on the app theme without dynamic color.
+ * stringResource reads LocalResources, not LocalContext, so all three locals are provided together.
+ */
 @Composable
 fun AriaTestTheme(pseudo: Boolean = false, fontScale: Float = 1f, content: @Composable () -> Unit) {
     val base = LocalContext.current
@@ -21,6 +30,7 @@ fun AriaTestTheme(pseudo: Boolean = false, fontScale: Float = 1f, content: @Comp
     }
     val ctx = remember(cfg) { base.createConfigurationContext(cfg) }
     CompositionLocalProvider(
-        LocalContext provides ctx, LocalConfiguration provides cfg, LocalDensity provides Density(ctx.resources.displayMetrics.density, fontScale),
+        LocalContext provides ctx, LocalConfiguration provides cfg, LocalResources provides ctx.resources,
+        LocalDensity provides Density(ctx.resources.displayMetrics.density, fontScale),
     ) { AriaTheme(dynamic = false, content = content) }
 }

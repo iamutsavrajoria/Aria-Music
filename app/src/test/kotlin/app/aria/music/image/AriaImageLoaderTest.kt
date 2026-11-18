@@ -89,4 +89,25 @@ class AriaImageLoaderTest {
         assertTrue(result is ErrorResult)
         loader.shutdown()
     }
+
+    @Test fun gatedClientDisablesBuiltInRedirects() {
+        val client = AriaImageLoader.gatedClient(OkHttpClient())
+        assertFalse(client.followRedirects)
+        assertFalse(client.followSslRedirects)
+        assertTrue(client.interceptors.first() is RedirectGateInterceptor)
+    }
+
+    /** Serves a 302 from an allowlisted host to a foreign host; the foreign host must never be contacted. */
+    @Test fun createdLoaderNeverFollowsARedirectToAForeignHost() = runBlocking {
+        val redirecting = OkHttpClient.Builder().addInterceptor(okhttp3.Interceptor { chain ->
+            fetched += chain.request().url.toString()
+            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(302).message("Found")
+                .header("Location", "https://evil.example/steal.png").body("".toResponseBody()).build()
+        }).build()
+        val loader = AriaImageLoader.create(ctx, null, redirecting)
+        val result = loader.execute(ImageRequest.Builder(ctx).data("https://i.ytimg.com/vi/x/hq.jpg").build())
+        assertTrue(result is ErrorResult)
+        assertEquals(listOf("https://i.ytimg.com/vi/x/hq.jpg"), fetched)
+        loader.shutdown()
+    }
 }

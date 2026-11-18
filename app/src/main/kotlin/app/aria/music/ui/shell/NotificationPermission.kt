@@ -31,12 +31,21 @@ fun NotificationPermissionGate(hasQueue: Boolean) {
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val granted = Build.VERSION.SDK_INT < 33 || context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
     if (NotificationPermissionPolicy.shouldExplain(Build.VERSION.SDK_INT, granted, asked, hasQueue)) {
-        AlertDialog(
-            onDismissRequest = { asked = true },
-            title = { Text(stringResource(R.string.notif_title)) },
-            text = { Text(stringResource(R.string.notif_body)) },
-            confirmButton = { TextButton(onClick = { asked = true; launcher.launch(Manifest.permission.POST_NOTIFICATIONS) }) { Text(stringResource(R.string.notif_allow)) } },
-            dismissButton = { TextButton(onClick = { asked = true }) { Text(stringResource(R.string.notif_not_now)) } },
+        NotificationPermissionDialog(
+            onAllow = { asked = true; launcher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+            onNotNow = { asked = true },
         )
     }
+}
+
+/** Stateless so the button wiring can be tested without the system permission dialog. Dismissing counts as "Not now". */
+@Composable
+fun NotificationPermissionDialog(onAllow: () -> Unit, onNotNow: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onNotNow,
+        title = { Text(stringResource(R.string.notif_title)) },
+        text = { Text(stringResource(R.string.notif_body)) },
+        confirmButton = { TextButton(onClick = onAllow) { Text(stringResource(R.string.notif_allow)) } },
+        dismissButton = { TextButton(onClick = onNotNow) { Text(stringResource(R.string.notif_not_now)) } },
+    )
 }

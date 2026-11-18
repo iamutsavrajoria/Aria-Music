@@ -23,10 +23,9 @@ def test_image_package_is_exempt(tmp_path):
     assert code == 0, out
 
 
-def test_canary_file_is_no_longer_exempt(tmp_path):
-    put(tmp_path, f"{BASE}/Canary.kt", "AsyncImage(model = m)\n")
-    code, out = run(tmp_path)
-    assert code == 1 and "Canary.kt" in out, out
+def test_missing_scan_root_fails(tmp_path):
+    code, out = run(tmp_path / "does-not-exist")
+    assert code == 1 and "missing or unreadable" in out, out
 
 
 def test_banned_apis_outside_image_package_fail(tmp_path):
