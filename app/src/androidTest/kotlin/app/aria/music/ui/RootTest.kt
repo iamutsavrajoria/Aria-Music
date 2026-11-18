@@ -2,9 +2,9 @@
 package app.aria.music.ui
 
 import androidx.compose.material3.Text
-import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.platform.app.InstrumentationRegistry
@@ -23,7 +23,6 @@ import org.junit.Rule
 import org.junit.Test
 
 /** The shell wired to a real PlayerController over a fake engine: the message path from engine event to snackbar. */
-@OptIn(ExperimentalTestApi::class)
 class RootTest {
     @get:Rule val rule = createComposeRule()
     private val target get() = InstrumentationRegistry.getInstrumentation().targetContext
@@ -32,7 +31,7 @@ class RootTest {
     private val controller = PlayerController(engine, { }, CoroutineScope(SupervisorJob() + Dispatchers.Unconfined))
 
     private fun skipped(title: String, reason: String) = PlaybackEvent.Skipped(Samples.track(1, title), reason)
-    private fun textShown(text: String) = rule.onNodeWithText(text).fetchSemanticsNodes(atLeastOneRootRequired = false).isNotEmpty()
+    private fun textShown(text: String) = rule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
 
     @Test fun anEngineEventShowsAsASnackbar() {
         rule.setContent { AriaTestTheme { AriaRoot(legacySearch = { Text("SEARCH") }, controller = controller) } }
