@@ -12,7 +12,7 @@
     <string name="retry">Retry</string>
     <string name="offline_title">You are offline</string>
     <string name="offline_body">Check your connection and try again.</string>
-    <string name="artist_separator">, </string>
+    <string name="artist_separator">", "</string>
     <string name="msg_skipped_unavailable">Skipped %1$s: not available</string>
     <string name="msg_skipped_network">Skipped %1$s: network error</string>
     <string name="msg_skipped_other">Skipped %1$s: could not play</string>
