@@ -91,8 +91,8 @@ class DefaultPlaybackEngine(
     private fun status(): PlaybackStatus = when {
         errorMsg != null -> PlaybackStatus.Error(errorMsg!!)
         model.items.isEmpty() -> PlaybackStatus.Idle
+        !wantPlay -> PlaybackStatus.Paused      // a pause wins over waiting: the user can pause while the network is down
         waiting -> PlaybackStatus.WaitingForNetwork
-        !wantPlay -> PlaybackStatus.Paused
         buffering -> PlaybackStatus.Buffering
         else -> PlaybackStatus.Playing
     }

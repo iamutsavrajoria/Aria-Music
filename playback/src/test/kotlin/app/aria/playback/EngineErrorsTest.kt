@@ -78,6 +78,17 @@ class EngineErrorsTest {
         assertEquals(1, h.output.retries.size); assertNotEquals(PlaybackStatus.WaitingForNetwork, h.state.status)
         h.release()
     }
+    @Test fun pausingWhileWaitingForTheNetworkShowsPausedAndStaysPaused() = runTest {
+        val h = harness().attach(); started(h)
+        h.network.online.value = false
+        h.engine.onError(PlayerError.Io); h.settle()
+        assertEquals(PlaybackStatus.WaitingForNetwork, h.state.status)
+        h.engine.pause(); h.settle()
+        assertEquals(PlaybackStatus.Paused, h.state.status)
+        h.network.online.value = true; h.settle()
+        assertEquals(PlaybackStatus.Paused, h.state.status); assertFalse(h.output.playWhenReady)
+        h.release()
+    }
     @Test fun threeConsecutiveFailuresStop() = runTest {
         val h = harness().attach(); started(h, n = 6)
         repeat(3) { h.engine.onError(PlayerError.Permanent); h.settle() }

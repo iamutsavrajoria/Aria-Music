@@ -30,5 +30,24 @@
     <string name="state_playback_problem">Playback problem</string>
     <string name="state_waiting_for_network">Waiting for network</string>
     <string name="state_buffering">Buffering</string>
-    <string name="now_playing_placeholder">Now playing is coming soon.</string>
+    <string name="queue_placeholder">The queue is coming soon.</string>
+    <string name="back">Back</string>
+    <string name="np_like">Like</string>
+    <string name="np_unlike">Remove like</string>
+    <string name="np_queue">Queue</string>
+    <string name="np_shuffle_on">Shuffle on</string>
+    <string name="np_shuffle_off">Shuffle off</string>
+    <string name="np_repeat_off">Repeat off</string>
+    <string name="np_repeat_all">Repeat all</string>
+    <string name="np_repeat_one">Repeat one</string>
+    <string name="np_sleep">Sleep timer</string>
+    <string name="np_sleep_in_minutes">Sleep in %1$d minutes</string>
+    <string name="np_sleep_end_of_track">At end of this track</string>
+    <string name="np_sleep_off">Turn off timer</string>
+    <string name="np_sleep_active">Sleep timer on</string>
+    <string name="np_sleep_end_active">Sleeps after this track</string>
+    <string name="np_seek_position">%1$s of %2$s</string>
+    <string name="np_nothing_playing">Nothing is playing</string>
+    <string name="np_offline_banner">Waiting for network</string>
+    <string name="np_error_banner">Playback stopped</string>
 </resources>

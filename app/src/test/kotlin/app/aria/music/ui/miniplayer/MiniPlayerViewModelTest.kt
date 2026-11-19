@@ -39,4 +39,32 @@ class MiniPlayerViewModelTest {
         vm.toggle(); vm.next()
         assertEquals(listOf("play", "next"), engine.calls)
     }
+
+    private fun one(status: PlaybackStatus) = PlaybackState(queue = listOf(QueueItem(1, Samples.track(1))), currentIndex = 0, status = status, durationMs = 180_000)
+
+    @Test fun stateDoesNotReemitWhenOnlyThePositionChanges() = runTest {
+        val engine = FakePlaybackEngine(); val vm = vm(engine)
+        engine.mutableState.value = one(PlaybackStatus.Playing); runCurrent()
+        val seen = mutableListOf<MiniPlayerUiState>(); backgroundScope.launch { vm.state.collect { seen += it } }; runCurrent()
+        val before = seen.size
+        engine.mutableState.value = engine.mutableState.value.copy(positionMs = 1_000); runCurrent()
+        engine.mutableState.value = engine.mutableState.value.copy(positionMs = 2_000); runCurrent()
+        assertEquals(before, seen.size); assertEquals(2_000L, vm.positionMs.value)
+    }
+
+    @Test fun pauseWhilePlaying() = runTest {
+        val engine = FakePlaybackEngine(); val vm = vm(engine)
+        engine.mutableState.value = one(PlaybackStatus.Playing); runCurrent()
+        vm.toggle()
+        assertEquals(listOf("pause"), engine.calls)
+    }
+
+    @Test fun bufferingAndWaitingForNetworkMapToStatusAndStillCountAsPlaying() = runTest {
+        val engine = FakePlaybackEngine(); val vm = vm(engine)
+        engine.mutableState.value = one(PlaybackStatus.Buffering); runCurrent()
+        (vm.state.value as MiniPlayerUiState.Showing).let { assertEquals(PlayerStatus.BUFFERING, it.status); assertTrue(it.isPlaying) }
+        engine.mutableState.value = one(PlaybackStatus.WaitingForNetwork); runCurrent()
+        (vm.state.value as MiniPlayerUiState.Showing).let { assertEquals(PlayerStatus.WAITING_FOR_NETWORK, it.status); assertTrue(it.isPlaying) }
+        vm.toggle(); assertEquals(listOf("pause"), engine.calls)
+    }
 }

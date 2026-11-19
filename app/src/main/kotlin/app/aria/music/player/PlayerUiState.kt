@@ -17,7 +17,8 @@ data class PlayerUiState(
 ) {
     val current: QueueItem? get() = queue.getOrNull(currentIndex)
     val hasQueue: Boolean get() = queue.isNotEmpty()
-    val isPlaying: Boolean get() = status == PlayerStatus.PLAYING || status == PlayerStatus.BUFFERING
+    /** Playback is wanted: playing, buffering or stalled on the network. The play/pause button then pauses (ERROR and PAUSED play). */
+    val isPlaying: Boolean get() = status == PlayerStatus.PLAYING || status == PlayerStatus.BUFFERING || status == PlayerStatus.WAITING_FOR_NETWORK
 }
 
 enum class SkipReason { UNAVAILABLE, NETWORK, OTHER }

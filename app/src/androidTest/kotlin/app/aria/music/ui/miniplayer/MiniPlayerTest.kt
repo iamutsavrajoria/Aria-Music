@@ -32,6 +32,15 @@ class MiniPlayerTest {
         rule.onNodeWithContentDescription(str(R.string.mini_open_now_playing, "Title")).assertHeightIsAtLeast(48.dp).performClick()
         assertEquals(listOf(1, 1, 1), listOf(t, n, e))
     }
-    @Test fun errorStatusIsAnnounced() { show(state(status = PlayerStatus.ERROR)); rule.onNodeWithTag(TAG_MINI_PLAYER).assert(SemanticsMatcher.keyIsDefined(androidx.compose.ui.semantics.SemanticsProperties.StateDescription)) }
-    @Test fun survivesPseudolocaleAndBigFonts() { show(state(), pseudo = true, fontScale = 2f); rule.onNodeWithTag(TAG_MINI_PLAY).assertIsDisplayed(); rule.onNodeWithTag(TAG_MINI_NEXT).assertIsDisplayed() }
+    private fun assertStateDescription(status: PlayerStatus, @androidx.annotation.StringRes expected: Int) {
+        show(state(status = status))
+        rule.onNodeWithTag(TAG_MINI_PLAYER).assert(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.StateDescription, str(expected)))
+    }
+    @Test fun errorStatusIsAnnounced() = assertStateDescription(PlayerStatus.ERROR, R.string.state_playback_problem)
+    @Test fun waitingForNetworkIsAnnounced() = assertStateDescription(PlayerStatus.WAITING_FOR_NETWORK, R.string.state_waiting_for_network)
+    @Test fun bufferingIsAnnounced() = assertStateDescription(PlayerStatus.BUFFERING, R.string.state_buffering)
+    @Test fun playingAndPausedHaveNoStateDescription() {
+        show(state(playing = true)); rule.onNodeWithTag(TAG_MINI_PLAYER).assert(SemanticsMatcher.keyNotDefined(androidx.compose.ui.semantics.SemanticsProperties.StateDescription))
+    }
+    @Test fun survivesPseudolocaleAndBigFonts() { show(state(), pseudo = true, fontScale = 2f); rule.onNodeWithText("Title", substring = true).assertIsDisplayed(); rule.onNodeWithTag(TAG_MINI_PLAY).assertIsDisplayed(); rule.onNodeWithTag(TAG_MINI_NEXT).assertIsDisplayed() }
 }

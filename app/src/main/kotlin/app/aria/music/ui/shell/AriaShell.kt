@@ -33,6 +33,7 @@ import androidx.navigation.compose.rememberNavController
 import app.aria.music.player.PlayerController
 import app.aria.music.player.PlayerMessage
 import app.aria.music.ui.miniplayer.MiniPlayerHost
+import app.aria.music.ui.nowplaying.NowPlayingScreen
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
@@ -104,6 +105,7 @@ fun AriaRoot(
     controller: PlayerController = hiltViewModel<ShellViewModel>().controller,
     /** Overridable so tests without a Hilt activity can swap out the Hilt-backed mini player. */
     miniPlayer: @Composable (onExpand: () -> Unit) -> Unit = { MiniPlayerHost(onExpand = it) },
+    nowPlaying: @Composable (onBack: () -> Unit, onOpenQueue: () -> Unit) -> Unit = { back, queue -> NowPlayingScreen(back, queue) },
 ) {
     val nav = rememberNavController()
     val snackbar = remember { SnackbarHostState() }
@@ -119,7 +121,7 @@ fun AriaRoot(
         selected = selected,
         onSelect = nav::navigateTopLevel,
         snackbarHost = snackbar,
-        miniPlayer = { miniPlayer { nav.navigate(NowPlayingRoute) } },
+        miniPlayer = { miniPlayer { nav.navigate(NowPlayingRoute) { launchSingleTop = true } } },
         miniPlayerVisible = !fullScreen,
-    ) { padding -> AriaNavHost(nav, legacySearch, Modifier.padding(padding)) }
+    ) { padding -> AriaNavHost(nav, legacySearch, Modifier.padding(padding), nowPlaying) }
 }

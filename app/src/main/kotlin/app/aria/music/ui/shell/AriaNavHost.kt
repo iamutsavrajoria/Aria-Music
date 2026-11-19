@@ -9,13 +9,21 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import app.aria.music.R
 import app.aria.music.ui.common.EmptyState
+import app.aria.music.ui.nowplaying.NowPlayingScreen
 
 @Composable
-fun AriaNavHost(nav: NavHostController, legacySearch: @Composable () -> Unit, modifier: Modifier = Modifier) {
+fun AriaNavHost(
+    nav: NavHostController,
+    legacySearch: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    /** Overridable so tests without a Hilt activity can swap out the Hilt-backed screen. */
+    nowPlaying: @Composable (onBack: () -> Unit, onOpenQueue: () -> Unit) -> Unit = { back, queue -> NowPlayingScreen(back, queue) },
+) {
     NavHost(nav, startDestination = HomeRoute, modifier = modifier) {
         composable<HomeRoute> { Placeholder(R.string.home_placeholder) }
         composable<SearchRoute> { legacySearch() }
-        composable<NowPlayingRoute> { Placeholder(R.string.now_playing_placeholder) } // replaced by Task 14
+        composable<NowPlayingRoute> { nowPlaying({ nav.popBackStack() }, { nav.navigate(QueueRoute) { launchSingleTop = true } }) }
+        composable<QueueRoute> { Placeholder(R.string.queue_placeholder) } // replaced by Task 15
         composable<LibraryRoute> { Placeholder(R.string.library_placeholder) }
     }
 }

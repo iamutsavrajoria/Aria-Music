@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package app.aria.music.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.material3.Text
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
@@ -57,6 +59,25 @@ class RootTest {
         engine.mutableEvents.tryEmit(skipped("New", "network error")); rule.mainClock.advanceTimeBy(1_500)
         rule.onNodeWithText(target.getString(R.string.msg_skipped_network, "New")).assertIsDisplayed()
         rule.onNodeWithText(target.getString(R.string.msg_skipped_unavailable, "Old")).assertDoesNotExist()
+    }
+
+    @Test fun theMiniPlayerSlotIsShownOnATopLevelRouteAndHiddenOnNowPlaying() {
+        rule.setContent {
+            AriaTestTheme {
+                AriaRoot(
+                    legacySearch = { Text("SEARCH") }, controller = controller,
+                    miniPlayer = { onExpand -> Text("MINI", Modifier.clickable(onClick = onExpand)) },
+                    nowPlaying = { onBack, _ -> Text("NOWPLAYING", Modifier.clickable(onClick = onBack)) },
+                )
+            }
+        }
+        rule.onNodeWithText("MINI").assertIsDisplayed()
+        rule.onNodeWithText("MINI").performClick()
+        rule.onNodeWithText("NOWPLAYING").assertIsDisplayed()
+        rule.onNodeWithText("MINI").assertDoesNotExist()
+        rule.onNodeWithText("NOWPLAYING").performClick()      // back
+        rule.onNodeWithText("MINI").assertIsDisplayed()
+        rule.onNodeWithText("NOWPLAYING").assertDoesNotExist()
     }
 
     @Test fun permissionDialogButtonsReportAllowAndNotNow() {

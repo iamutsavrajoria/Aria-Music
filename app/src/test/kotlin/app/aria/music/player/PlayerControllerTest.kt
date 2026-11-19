@@ -86,6 +86,17 @@ class PlayerControllerTest {
         )
     }
 
+    @Test fun toggleWhileWaitingForTheNetworkPausesAndAnErrorRetriesWithPlay() = runTest {
+        val engine = FakePlaybackEngine(); val c = controller(engine)
+        val queue = listOf(QueueItem(1, Samples.track(1)))
+        engine.mutableState.value = PlaybackState(queue = queue, currentIndex = 0, status = PlaybackStatus.WaitingForNetwork); runCurrent()
+        assertTrue(c.ui.value.isPlaying)
+        c.togglePlayPause(); assertEquals("pause", engine.calls.last())
+        engine.mutableState.value = PlaybackState(queue = queue, currentIndex = 0, status = PlaybackStatus.Error("x")); runCurrent()
+        assertFalse(c.ui.value.isPlaying)
+        c.togglePlayPause(); assertEquals("play", engine.calls.last())
+    }
+
     @Test fun transportCommandsDelegate() = runTest {
         val engine = FakePlaybackEngine(); val c = controller(engine)
         engine.mutableState.value = PlaybackState(queue = listOf(QueueItem(1, Samples.track(1))), currentIndex = 0, status = PlaybackStatus.Playing); runCurrent()
