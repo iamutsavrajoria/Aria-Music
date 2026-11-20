@@ -19,5 +19,6 @@ fun PlayerMessage.text(r: Resources): String = when (this) {
     )
     PlayerMessage.TooManyFailures -> r.getString(R.string.msg_too_many_failures)
     is PlayerMessage.QueueWindowed -> r.getString(R.string.msg_queue_windowed, Formatters.count(queued), Formatters.count(total))
+    PlayerMessage.LikeFailed -> r.getString(R.string.msg_like_failed)
     is PlayerMessage.QueueFull -> r.getQuantityString(R.plurals.msg_queue_full, dropped, dropped, Formatters.count(PlayerController.QUEUE_CAP))
 }

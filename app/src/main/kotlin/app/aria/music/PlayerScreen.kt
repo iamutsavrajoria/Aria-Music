@@ -117,7 +117,7 @@ fun PlayerScreen(search: SearchSource, engine: PlaybackEngine, startService: () 
                         Button(onClick = { engine.previous() }, enabled = current != null) { Text("Prev") }
                         Button(
                             onClick = {
-                                if (state.status == PlaybackStatus.Playing || state.status == PlaybackStatus.Buffering) engine.pause() else engine.play()
+                                if (state.status == PlaybackStatus.Playing || state.status == PlaybackStatus.Buffering || state.status == PlaybackStatus.WaitingForNetwork) engine.pause() else engine.play()
                             },
                             enabled = current != null,
                         ) { Text("Play/Pause") }

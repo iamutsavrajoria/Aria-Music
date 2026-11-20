@@ -17,6 +17,7 @@
     <string name="msg_skipped_network">Skipped %1$s: network error</string>
     <string name="msg_skipped_other">Skipped %1$s: could not play</string>
     <string name="msg_too_many_failures">Stopped after several tracks failed in a row</string>
+    <string name="msg_like_failed">Could not update your library</string>
     <string name="msg_queue_windowed">Queued %1$s of %2$s songs, starting from the one you tapped</string>
     <string name="notif_title">Show playback controls?</string>
     <string name="notif_body">Android needs your permission to show the player in the notification shade and on the lock screen. Music plays either way.</string>
@@ -41,7 +42,6 @@
     <string name="np_repeat_all">Repeat all</string>
     <string name="np_repeat_one">Repeat one</string>
     <string name="np_sleep">Sleep timer</string>
-    <string name="np_sleep_in_minutes">Sleep in %1$d minutes</string>
     <string name="np_sleep_end_of_track">At end of this track</string>
     <string name="np_sleep_off">Turn off timer</string>
     <string name="np_sleep_active">Sleep timer on</string>

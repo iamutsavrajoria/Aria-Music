@@ -39,4 +39,8 @@ class PlayerMessageTextTest {
         assertEquals("1 song did not fit in the queue (limit 500)", PlayerMessage.QueueFull(1).text(r))
         assertEquals("50 songs did not fit in the queue (limit 500)", PlayerMessage.QueueFull(50).text(r))
     }
+
+    @Test fun likeFailureIsNonTechnical() {
+        assertEquals("Could not update your library", PlayerMessage.LikeFailed.text(r))
+    }
 }

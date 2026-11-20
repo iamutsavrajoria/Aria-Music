@@ -16,13 +16,24 @@ class NowPlayingViewModelTest {
     @BeforeTest fun setMain() = Dispatchers.setMain(UnconfinedTestDispatcher())
     @AfterTest fun resetMain() = Dispatchers.resetMain()
 
-    private class Env(scope: kotlinx.coroutines.CoroutineScope) {
-        val engine = FakePlaybackEngine(); val library = FakeLibraryRepository(); val settings = FakeSettingsRepository(AppSettings(sleepTimerDefaultMinutes = 20))
-        val vm = NowPlayingViewModel(PlayerController(engine, ServiceLauncher { }, scope), library, settings)
+    private class Env(scope: kotlinx.coroutines.CoroutineScope, libraryOverride: LibraryRepository? = null) {
+        val engine = FakePlaybackEngine(); val fakeLibrary = FakeLibraryRepository(); val library: LibraryRepository = libraryOverride ?: fakeLibrary
+        val settings = FakeSettingsRepository(AppSettings(sleepTimerDefaultMinutes = 20))
+        val controller = PlayerController(engine, ServiceLauncher { }, scope)
+        val vm = NowPlayingViewModel(controller, library, settings)
         init { scope.launch { vm.state.collect { } } }
-        fun play(status: PlaybackStatus = PlaybackStatus.Playing) {
-            engine.mutableState.value = PlaybackState(queue = Samples.tracks(3).mapIndexed { i, t -> QueueItem(i + 1L, t) }, currentIndex = 1, status = status, durationMs = 180_000, shuffle = true, repeat = RepeatMode.ALL)
+        fun play(status: PlaybackStatus = PlaybackStatus.Playing, durationMs: Long = 180_000) {
+            engine.mutableState.value = PlaybackState(queue = Samples.tracks(3).mapIndexed { i, t -> QueueItem(i + 1L, t) }, currentIndex = 1, status = status, durationMs = durationMs, shuffle = true, repeat = RepeatMode.ALL)
         }
+    }
+
+    /** A library whose writes fail, like a database error. */
+    private fun failingLibrary(failure: Throwable): LibraryRepository = object : LibraryRepository by FakeLibraryRepository() {
+        override suspend fun setLiked(track: Track, liked: Boolean) { throw failure }
+    }
+
+    private fun TestScope.collectMessages(c: PlayerController): List<PlayerMessage> {
+        val out = mutableListOf<PlayerMessage>(); backgroundScope.launch { c.messages.collect { out += it } }; runCurrent(); return out
     }
 
     @Test fun emptyWithoutAQueue() = runTest { assertEquals(NowPlayingUiState.Empty, Env(backgroundScope).vm.state.value) }
@@ -40,7 +51,7 @@ class NowPlayingViewModelTest {
         a.onLike(); runCurrent()
         assertTrue((e.vm.state.value as NowPlayingUiState.Content).liked)
         // Liking also puts the song in the library (ADR-0003).
-        assertEquals(listOf(Samples.track(2)), e.library.songs("", LibrarySort.TITLE).first().map { it.track })
+        assertEquals(listOf(Samples.track(2)), e.fakeLibrary.songs("", LibrarySort.TITLE).first().map { it.track })
         a.onLike(); runCurrent()
         assertFalse((e.vm.state.value as NowPlayingUiState.Content).liked)
     }
@@ -56,7 +67,7 @@ class NowPlayingViewModelTest {
     @Test fun likeWithNothingPlayingDoesNothing() = runTest {
         val e = Env(backgroundScope)
         e.vm.actions({}, {}).onLike(); runCurrent()
-        assertTrue(e.library.songs("", LibrarySort.TITLE).first().isEmpty())
+        assertTrue(e.fakeLibrary.songs("", LibrarySort.TITLE).first().isEmpty())
     }
 
     @Test fun actionsDelegateToTheController() = runTest {
@@ -98,5 +109,39 @@ class NowPlayingViewModelTest {
         e.engine.mutableState.value = e.engine.mutableState.value.copy(positionMs = 1_000); runCurrent()
         e.engine.mutableState.value = e.engine.mutableState.value.copy(positionMs = 2_000); runCurrent()
         assertEquals(before, seen.size); assertEquals(2_000L, e.vm.positionMs.value)
+    }
+
+    @Test fun aFailedLikeIsReportedAndDoesNotCrash() = runTest {
+        val e = Env(backgroundScope, failingLibrary(java.io.IOException("disk full"))); e.play(); runCurrent()
+        val msgs = collectMessages(e.controller)
+        e.vm.actions({}, {}).onLike(); runCurrent()
+        assertEquals(listOf<PlayerMessage>(PlayerMessage.LikeFailed), msgs)
+        assertFalse((e.vm.state.value as NowPlayingUiState.Content).liked)
+    }
+
+    @Test fun aCancelledLikeIsNotReportedAsAFailure() = runTest {
+        val e = Env(backgroundScope, failingLibrary(kotlinx.coroutines.CancellationException("cancelled"))); e.play(); runCurrent()
+        val msgs = collectMessages(e.controller)
+        e.vm.actions({}, {}).onLike(); runCurrent()
+        assertTrue(msgs.isEmpty())
+    }
+
+    @Test fun unlikingKeepsTheSongInTheLibrary() = runTest {
+        val e = Env(backgroundScope); e.play(); runCurrent()
+        val a = e.vm.actions({}, {}); val id = Samples.track(2).id
+        a.onLike(); runCurrent(); a.onLike(); runCurrent()
+        assertFalse((e.vm.state.value as NowPlayingUiState.Content).liked)
+        assertTrue(e.library.isInLibrary(id).first())
+        assertEquals(listOf(Samples.track(2)), e.fakeLibrary.songs("", LibrarySort.TITLE).first().map { it.track })
+    }
+
+    @Test fun durationFallsBackToTheTrackLengthWhileTheEngineDoesNotKnowIt() = runTest {
+        val e = Env(backgroundScope); e.play(durationMs = 0); runCurrent()
+        e.engine.mutableState.value = e.engine.mutableState.value.copy(queue = listOf(QueueItem(1L, Samples.track(1).copy(durationMs = 90_000L))), currentIndex = 0); runCurrent()
+        assertEquals(90_000L, (e.vm.state.value as NowPlayingUiState.Content).durationMs)
+        e.engine.mutableState.value = e.engine.mutableState.value.copy(durationMs = 80_000L); runCurrent()
+        assertEquals(80_000L, (e.vm.state.value as NowPlayingUiState.Content).durationMs)
+        e.engine.mutableState.value = e.engine.mutableState.value.copy(durationMs = 0L, queue = listOf(QueueItem(1L, Samples.track(1).copy(durationMs = null)))); runCurrent()
+        assertEquals(0L, (e.vm.state.value as NowPlayingUiState.Content).durationMs)
     }
 }

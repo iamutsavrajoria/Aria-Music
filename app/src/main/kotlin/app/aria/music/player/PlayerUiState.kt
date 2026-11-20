@@ -28,6 +28,8 @@ sealed interface PlayerMessage {
     data object TooManyFailures : PlayerMessage
     data class QueueWindowed(val queued: Int, val total: Int) : PlayerMessage
     data class QueueFull(val dropped: Int) : PlayerMessage
+    /** A like/unlike could not be saved (database error). */
+    data object LikeFailed : PlayerMessage
 }
 
 internal fun PlaybackState.toUi() = PlayerUiState(

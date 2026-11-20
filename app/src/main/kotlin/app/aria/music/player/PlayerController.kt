@@ -54,6 +54,9 @@ class PlayerController @Inject constructor(
     }
 
     /** Best effort: a refused start (background-start limits) must never block the queue command; the engine retries via its own guarded start. */
+    /** Lets other screens show a non-blocking message through the same snackbar path as player events. */
+    fun notify(message: PlayerMessage) { channel.trySend(message) }
+
     private fun startService() { runCatching { launcher.start() } }
 
     fun skipTo(index: Int) = engine.skipTo(index)

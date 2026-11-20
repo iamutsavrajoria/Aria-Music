@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -160,7 +161,7 @@ private fun SleepButton(state: NowPlayingUiState.Content, actions: NowPlayingAct
         }
         DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.np_sleep_in_minutes, state.sleepDefaultMinutes)) },
+                text = { Text(pluralStringResource(R.plurals.np_sleep_in_minutes, state.sleepDefaultMinutes, state.sleepDefaultMinutes)) },
                 onClick = { open = false; actions.onSleepMinutes(state.sleepDefaultMinutes) },
             )
             DropdownMenuItem(text = { Text(stringResource(R.string.np_sleep_end_of_track)) }, onClick = { open = false; actions.onSleepEndOfTrack() })
@@ -175,13 +176,14 @@ private fun SeekBar(positionMs: () -> Long, durationMs: Long, onSeek: (Long) -> 
     val position = positionMs()                       // only this composable reads the position
     val duration = durationMs.coerceAtLeast(1L)
     val fraction = drag ?: (position.toFloat() / duration).coerceIn(0f, 1f)
-    val shownMs = drag?.let { (it * duration).toLong() } ?: position
+    // Never show or commit more than the track length (a stale position can briefly exceed a fallback duration).
+    val shownMs = (drag?.let { (it * duration).toLong() } ?: position).coerceIn(0L, duration)
     val desc = stringResource(R.string.np_seek_position, Formatters.duration(shownMs), Formatters.duration(durationMs))
     Column {
         Slider(
             value = fraction,
             onValueChange = { drag = it },
-            onValueChangeFinished = { drag?.let { onSeek((it * duration).toLong()) }; drag = null },
+            onValueChangeFinished = { drag?.let { onSeek((it * duration).toLong().coerceIn(0L, duration)) }; drag = null },
             enabled = durationMs > 0,
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(TAG_NP_SEEK).semantics { stateDescription = desc },
         )

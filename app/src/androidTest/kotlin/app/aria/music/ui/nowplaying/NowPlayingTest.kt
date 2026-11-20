@@ -4,12 +4,14 @@ package app.aria.music.ui.nowplaying
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.dp
 import app.aria.domain.*
 import app.aria.music.R
 import app.aria.music.player.PlayerStatus
 import app.aria.music.ui.AriaTestTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 
@@ -17,16 +19,17 @@ class NowPlayingTest {
     @get:Rule val rule = createComposeRule()
     private fun str(id: Int, vararg a: Any) = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.getString(id, *a)
     private val track = Track(TrackId.youtube("dQw4w9WgXcQ"), "Title", listOf("Artist"), 200_000, null)
-    private fun content(status: PlayerStatus = PlayerStatus.PAUSED, liked: Boolean = false, shuffle: Boolean = false, repeat: RepeatMode = RepeatMode.OFF, sleep: SleepTimer? = null) =
-        NowPlayingUiState.Content(track, status, 200_000, shuffle, repeat, sleep, liked, 3, 0, 15)
+    private fun content(status: PlayerStatus = PlayerStatus.PAUSED, liked: Boolean = false, shuffle: Boolean = false, repeat: RepeatMode = RepeatMode.OFF, sleep: SleepTimer? = null, durationMs: Long = 200_000) =
+        NowPlayingUiState.Content(track, status, durationMs, shuffle, repeat, sleep, liked, 3, 0, 15)
     private class Calls { val log = mutableListOf<String>() }
     private fun actions(c: Calls) = NowPlayingActions(
         onBack = { c.log += "back" }, onToggle = { c.log += "toggle" }, onNext = { c.log += "next" }, onPrevious = { c.log += "previous" }, onSeek = { c.log += "seek:$it" },
         onShuffle = { c.log += "shuffle:$it" }, onRepeat = { c.log += "repeat" }, onLike = { c.log += "like" }, onSleepMinutes = { c.log += "sleep:$it" },
         onSleepEndOfTrack = { c.log += "sleepEnd" }, onSleepOff = { c.log += "sleepOff" }, onOpenQueue = { c.log += "queue" },
     )
-    private fun show(s: NowPlayingUiState, c: Calls = Calls(), pseudo: Boolean = false, fontScale: Float = 1f) =
-        rule.setContent { AriaTestTheme(pseudo, fontScale) { NowPlayingContent(s, { 65_000L }, actions(c)) } }
+    private fun show(s: NowPlayingUiState, c: Calls = Calls(), pseudo: Boolean = false, fontScale: Float = 1f, positionMs: Long = 65_000L) =
+        rule.setContent { AriaTestTheme(pseudo, fontScale) { NowPlayingContent(s, { positionMs }, actions(c)) } }
+    private fun plural(id: Int, n: Int) = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.resources.getQuantityString(id, n, n)
 
     @Test fun controlsHaveDescriptionsAndMinimumSize() {
         show(content())
@@ -51,7 +54,7 @@ class NowPlayingTest {
     }
     @Test fun sleepMenuOffersDefaultEndOfTrackAndOff() {
         val c = Calls(); show(content(), c)
-        rule.onNodeWithTag(TAG_NP_SLEEP).performClick(); rule.onNodeWithText(str(R.string.np_sleep_in_minutes, 15)).performClick()
+        rule.onNodeWithTag(TAG_NP_SLEEP).performClick(); rule.onNodeWithText(plural(R.plurals.np_sleep_in_minutes, 15)).performClick()
         rule.onNodeWithTag(TAG_NP_SLEEP).performClick(); rule.onNodeWithText(str(R.string.np_sleep_end_of_track)).performClick()
         rule.onNodeWithTag(TAG_NP_SLEEP).performClick(); rule.onNodeWithText(str(R.string.np_sleep_off)).performClick()
         assertEquals(listOf("sleep:15", "sleepEnd", "sleepOff"), c.log)
@@ -63,6 +66,45 @@ class NowPlayingTest {
         show(content())
         rule.onNodeWithTag(TAG_NP_SEEK).assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, str(R.string.np_seek_position, "1:05", "3:20")))
         rule.onNodeWithText("1:05").assertIsDisplayed(); rule.onNodeWithText("3:20").assertIsDisplayed()
+    }
+    @Test fun sleepMenuUsesTheSingularForOneMinute() {
+        show(content().copy(sleepDefaultMinutes = 1)); rule.onNodeWithTag(TAG_NP_SLEEP).performClick()
+        rule.onNodeWithText(plural(R.plurals.np_sleep_in_minutes, 1)).assertIsDisplayed()
+        assertEquals("Sleep in 1 minute", plural(R.plurals.np_sleep_in_minutes, 1))
+    }
+    @Test fun seekCommitsOnceOnReleaseNotPerTick() {
+        val c = Calls(); show(content(), c)
+        rule.onNodeWithTag(TAG_NP_SEEK).performTouchInput { down(Offset(width * 0.2f, centerY)); moveTo(Offset(width * 0.4f, centerY)); moveTo(Offset(width * 0.6f, centerY)) }
+        rule.waitForIdle(); assertEquals(emptyList<String>(), c.log)
+        rule.onNodeWithTag(TAG_NP_SEEK).performTouchInput { moveTo(Offset(width * 0.5f, centerY)); up() }
+        rule.waitForIdle()
+        assertEquals(1, c.log.size); assertTrue(c.log.single().startsWith("seek:"))
+        val ms = c.log.single().removePrefix("seek:").toLong()
+        assertTrue("seek landed at $ms", ms in 80_000L..120_000L)
+    }
+    @Test fun seekCommitIsClampedToTheDuration() {
+        val c = Calls(); show(content(), c)
+        rule.onNodeWithTag(TAG_NP_SEEK).performTouchInput { down(Offset(width * 0.5f, centerY)); moveTo(Offset(width * 3f, centerY)); up() }
+        rule.waitForIdle()
+        assertEquals(listOf("seek:200000"), c.log)
+    }
+    @Test fun seekCommitIsClampedAtTheStart() {
+        val c = Calls(); show(content(), c)
+        rule.onNodeWithTag(TAG_NP_SEEK).performTouchInput { down(Offset(width * 0.5f, centerY)); moveTo(Offset(-width * 3f, centerY)); up() }
+        rule.waitForIdle()
+        assertEquals(listOf("seek:0"), c.log)
+    }
+    @Test fun seekBarIsDisabledWithoutADuration() {
+        val c = Calls(); show(content(durationMs = 0), c)
+        rule.onNodeWithTag(TAG_NP_SEEK).assertIsNotEnabled()
+        rule.onNodeWithTag(TAG_NP_SEEK).performTouchInput { down(Offset(width * 0.5f, centerY)); moveTo(Offset(width * 0.9f, centerY)); up() }
+        rule.waitForIdle(); assertEquals(emptyList<String>(), c.log)
+    }
+    @Test fun seekBarIsEnabledWithADuration() { show(content()); rule.onNodeWithTag(TAG_NP_SEEK).assertIsEnabled() }
+    @Test fun shownPositionNeverExceedsTheDuration() {
+        show(content(durationMs = 90_000), positionMs = 400_000L)
+        rule.onNodeWithTag(TAG_NP_SEEK).assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, str(R.string.np_seek_position, "1:30", "1:30")))
+        rule.onNodeWithText("6:40").assertDoesNotExist()
     }
     @Test fun errorOfferingRetryAndOfflineBanner() {
         val c = Calls(); show(content(PlayerStatus.ERROR), c)

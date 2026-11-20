@@ -8,6 +8,10 @@ import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import app.aria.domain.PlaybackStatus
 
+/** Swiping the app away keeps the service only while playback is wanted (WaitingForNetwork is reported only then). */
+internal fun keepRunningAfterTaskRemoved(status: PlaybackStatus): Boolean =
+    status == PlaybackStatus.Playing || status == PlaybackStatus.Buffering || status == PlaybackStatus.WaitingForNetwork
+
 @androidx.annotation.OptIn(UnstableApi::class)
 class AriaPlaybackService : MediaSessionService() {
     private var session: MediaSession? = null
@@ -32,8 +36,7 @@ class AriaPlaybackService : MediaSessionService() {
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = session
 
     override fun onTaskRemoved(rootIntent: Intent?) {
-        val status = engine.state.value.status
-        if (status != PlaybackStatus.Playing && status != PlaybackStatus.Buffering) stopSelf()
+        if (!keepRunningAfterTaskRemoved(engine.state.value.status)) stopSelf()
     }
 
     override fun onDestroy() {
