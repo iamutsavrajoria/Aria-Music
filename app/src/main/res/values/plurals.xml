@@ -9,4 +9,8 @@
         <item quantity="one">Sleep in %1$d minute</item>
         <item quantity="other">Sleep in %1$d minutes</item>
     </plurals>
+    <plurals name="queue_count">
+        <item quantity="one">%1$s song</item>
+        <item quantity="other">%1$s songs</item>
+    </plurals>
 </resources>

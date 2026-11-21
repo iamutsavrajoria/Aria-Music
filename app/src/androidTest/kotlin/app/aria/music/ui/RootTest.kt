@@ -80,6 +80,25 @@ class RootTest {
         rule.onNodeWithText("NOWPLAYING").assertDoesNotExist()
     }
 
+    @Test fun theMiniPlayerSlotIsHiddenOnTheQueueRoute() {
+        rule.setContent {
+            AriaTestTheme {
+                AriaRoot(
+                    legacySearch = { Text("SEARCH") }, controller = controller,
+                    miniPlayer = { onExpand -> Text("MINI", Modifier.clickable(onClick = onExpand)) },
+                    nowPlaying = { _, onQueue -> Text("NOWPLAYING", Modifier.clickable(onClick = onQueue)) },
+                    queue = { onBack -> Text("QUEUE", Modifier.clickable(onClick = onBack)) },
+                )
+            }
+        }
+        rule.onNodeWithText("MINI").performClick()
+        rule.onNodeWithText("NOWPLAYING").performClick()
+        rule.onNodeWithText("QUEUE").assertIsDisplayed()
+        rule.onNodeWithText("MINI").assertDoesNotExist()
+        rule.onNodeWithText("QUEUE").performClick()           // back to Now Playing
+        rule.onNodeWithText("NOWPLAYING").assertIsDisplayed()
+    }
+
     @Test fun permissionDialogButtonsReportAllowAndNotNow() {
         var allowed = 0; var notNow = 0
         rule.setContent { AriaTestTheme { NotificationPermissionDialog(onAllow = { allowed++ }, onNotNow = { notNow++ }) } }
