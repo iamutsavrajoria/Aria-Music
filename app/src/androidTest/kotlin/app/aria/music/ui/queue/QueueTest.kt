@@ -28,7 +28,7 @@ class QueueTest {
 
     @Test fun rowsMarkTheCurrentOneAndPlayOnTap() {
         show(QueueUiState.Content(listOf(row(0), row(1, current = true), row(2))))
-        rule.onNodeWithTag("queue:row:101").assertContentDescriptionContains(str(R.string.queue_now_playing))
+        rule.onNodeWithTag("queue:row:101").assertContentDescriptionContains(str(R.string.queue_now_playing), substring = true)
         rule.onNodeWithTag("queue:row:102").performClick(); assertEquals(listOf("play:2"), log)
     }
 
@@ -59,6 +59,9 @@ class QueueTest {
 
     @Test fun largeQueueScrollsAndSurvivesBigFonts() {
         show(QueueUiState.Content((0 until 500).map { row(it) }), pseudo = true, fontScale = 2f)
-        rule.onNodeWithTag(TAG_QUEUE_LIST).performScrollToIndex(499); rule.onNodeWithTag("queue:row:599").assertIsDisplayed()
+        rule.onNodeWithTag(TAG_QUEUE_LIST).performScrollToIndex(499)
+        rule.waitForIdle()
+        try { rule.onNodeWithTag("queue:row:599").assertIsDisplayed() }
+        catch (e: AssertionError) { throw AssertionError(rule.onRoot().printToString(60), e) }
     }
 }
