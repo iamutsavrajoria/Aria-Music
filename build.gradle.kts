@@ -10,7 +10,7 @@ plugins {
     alias(libs.plugins.kotlin.serialization) apply false
     // 3.1.4 is the newest release; 2.9 (the plan's pin) predates Gradle 9 support. Not configuration-cache compatible
     // (CI runs checkLicense without it) and needs --no-parallel on Gradle 9 multi-project builds.
-    id("com.github.jk1.dependency-license-report") version "3.1.4"
+    id("com.github.jk1.dependency-license-report") version "3.1.5"
 }
 
 // Puts AGP and the Kotlin Gradle plugin on the classpath so modules can use
