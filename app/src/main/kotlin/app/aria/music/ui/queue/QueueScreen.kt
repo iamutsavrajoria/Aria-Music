@@ -63,24 +63,25 @@ fun QueueContent(state: QueueUiState, actions: QueueActions, modifier: Modifier 
     var confirmClear by rememberSaveable { mutableStateOf(false) }
     val rows = (state as? QueueUiState.Content)?.rows.orEmpty()
     Column(modifier.fillMaxSize().statusBarsPadding()) {
-        Row(Modifier.fillMaxWidth().padding(end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().padding(end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(actions.onBack, Modifier.size(48.dp)) { Icon(AriaIcons.ArrowBack, stringResource(R.string.back)) }
-            Column(Modifier.weight(1f)) {
-                Text(stringResource(R.string.queue_title), style = MaterialTheme.typography.titleLarge)
-                if (rows.isNotEmpty()) {
-                    val count = pluralStringResource(R.plurals.queue_count, rows.size, Formatters.count(rows.size))
-                    val full = rows.size >= PlayerController.QUEUE_CAP
-                    Text(
-                        if (full) stringResource(R.string.queue_count_at_limit, count, Formatters.count(PlayerController.QUEUE_CAP)) else count,
-                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            Text(stringResource(R.string.queue_title), Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+        }
+        if (rows.isNotEmpty()) {
+            // Count and Clear sit below the title (not beside it) so large fonts and long translations cannot squeeze the list out.
+            val count = pluralStringResource(R.plurals.queue_count, rows.size, Formatters.count(rows.size))
+            val full = rows.size >= PlayerController.QUEUE_CAP
+            Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+                Text(
+                    if (full) stringResource(R.string.queue_count_at_limit, count, Formatters.count(PlayerController.QUEUE_CAP)) else count,
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton({ confirmClear = true }, Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.queue_clear)) }
             }
-            if (rows.isNotEmpty()) TextButton({ confirmClear = true }, Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.queue_clear)) }
         }
         when (state) {
             QueueUiState.Empty -> EmptyState(R.string.queue_empty)
-            is QueueUiState.Content -> LazyColumn(Modifier.fillMaxSize().testTag(TAG_QUEUE_LIST)) {
+            is QueueUiState.Content -> LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag(TAG_QUEUE_LIST)) {
                 // queueId is unique per queue entry (the engine assigns one per item), so duplicates of a song keep distinct stable keys.
                 items(state.rows, key = { it.queueId }) { QueueRowItem(it, state.rows.lastIndex, actions) }
             }
