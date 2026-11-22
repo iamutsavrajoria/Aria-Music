@@ -91,8 +91,13 @@ class SearchViewModelTest {
 
     @Test fun playingASongUsesTheControllerAndLikeWritesTheLibrary() = runTest(dispatcher) {
         val e = Env(backgroundScope); val songs = Samples.tracks(3)
-        e.vm.playSong(songs, 1); e.vm.playNext(songs[0]); e.vm.addToQueue(songs[2]); e.vm.toggleLike(songs[0], true); advanceUntilIdle()
-        assertEquals(listOf(songs to 1), e.engine.playNowCalls); assertTrue("playNext" in e.engine.calls)
+        e.vm.playSong(songs, 1); advanceUntilIdle()
+        assertEquals(listOf(songs to 1), e.engine.playNowCalls)
+        // With a queue present, "add to queue" appends instead of starting playback.
+        e.engine.mutableState.value = PlaybackState(queue = songs.mapIndexed { i, t -> QueueItem(100L + i, t) }, currentIndex = 1); advanceUntilIdle()
+        e.vm.playNext(songs[0]); e.vm.addToQueue(songs[2]); e.vm.toggleLike(songs[0], true); advanceUntilIdle()
+        assertTrue("playNext" in e.engine.calls); assertEquals(listOf(listOf(songs[2])), e.engine.addedToEnd)
+        assertEquals(1, e.engine.playNowCalls.size)
         assertEquals(songs[0], e.library.songs("", LibrarySort.TITLE).first().single().track)
     }
 
