@@ -35,7 +35,7 @@ class SearchTest {
     @Test fun typingAndTheClearButtonReportTheQuery() {
         show(SearchUiState("da", SearchMode.Suggestions(emptyList(), emptyList())))
         rule.onNodeWithContentDescription(str(R.string.search_clear_query)).performClick()
-        rule.onNodeWithTag("search:field").performTextInput("x")
+        rule.onNodeWithTag("search:field").performTextReplacement("dax")
         assertEquals(listOf("query:", "query:dax"), log)
     }
 
