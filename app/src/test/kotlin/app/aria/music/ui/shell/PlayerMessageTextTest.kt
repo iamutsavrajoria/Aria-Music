@@ -47,4 +47,8 @@ class PlayerMessageTextTest {
     @Test fun historyFailureIsNonTechnical() {
         assertEquals("Could not update your search history", PlayerMessage.HistoryFailed.text(r))
     }
+
+    @Test fun refreshFailureSaysSavedContentStays() {
+        assertEquals("Could not refresh. Showing saved content.", PlayerMessage.RefreshFailed.text(r))
+    }
 }

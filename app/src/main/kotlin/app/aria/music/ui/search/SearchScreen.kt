@@ -31,6 +31,7 @@ import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
@@ -181,19 +182,20 @@ private fun ResultsList(results: SearchResults, actions: SearchActions) {
                 is ResultRow.Album -> BrowseRow(
                     row.album.thumbnailUrl, row.album.title,
                     (row.album.artists + listOfNotNull(row.album.year?.toString())).joinToString(stringResource(R.string.artist_separator)),
-                    round = false, Modifier.testTag("search:album:${row.album.id}"),
+                    round = false, R.string.browse_desc_album, Modifier.testTag("search:album:${row.album.id}"),
                 ) { actions.onOpenAlbum(row.album.id) }
-                is ResultRow.Artist -> BrowseRow(row.artist.thumbnailUrl, row.artist.name, null, round = true, Modifier.testTag("search:artist:${row.artist.id}")) { actions.onOpenArtist(row.artist.id) }
-                is ResultRow.Playlist -> BrowseRow(row.playlist.thumbnailUrl, row.playlist.title, row.playlist.subtitle, round = false, Modifier.testTag("search:playlist:${row.playlist.id}")) { actions.onOpenPlaylist(row.playlist.id) }
+                is ResultRow.Artist -> BrowseRow(row.artist.thumbnailUrl, row.artist.name, null, round = true, R.string.browse_desc_artist, Modifier.testTag("search:artist:${row.artist.id}")) { actions.onOpenArtist(row.artist.id) }
+                is ResultRow.Playlist -> BrowseRow(row.playlist.thumbnailUrl, row.playlist.title, row.playlist.subtitle, round = false, R.string.browse_desc_playlist, Modifier.testTag("search:playlist:${row.playlist.id}")) { actions.onOpenPlaylist(row.playlist.id) }
             }
         }
     }
 }
 
 @Composable
-private fun BrowseRow(thumbnailUrl: String?, title: String, subtitle: String?, round: Boolean, modifier: Modifier, onClick: () -> Unit) {
+private fun BrowseRow(thumbnailUrl: String?, title: String, subtitle: String?, round: Boolean, @StringRes typeDescription: Int, modifier: Modifier, onClick: () -> Unit) {
+    val description = stringResource(typeDescription, title)
     Row(
-        modifier.fillMaxWidth().heightIn(min = 56.dp).clickable(onClick = onClick).padding(horizontal = 16.dp),
+        modifier.semantics(mergeDescendants = true) { contentDescription = description }.fillMaxWidth().heightIn(min = 56.dp).clickable(onClick = onClick).padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -223,6 +225,7 @@ fun SearchScreen(
                     TrackMenuAction.PLAY_NEXT -> viewModel.playNext(track)
                     TrackMenuAction.ADD_TO_QUEUE -> viewModel.addToQueue(track)
                     TrackMenuAction.LIKE -> viewModel.toggleLike(track, true)
+                    TrackMenuAction.UNLIKE -> viewModel.toggleLike(track, false)
                 }
             },
             onOpenAlbum = onAlbum, onOpenArtist = onArtist, onOpenPlaylist = onPlaylist,

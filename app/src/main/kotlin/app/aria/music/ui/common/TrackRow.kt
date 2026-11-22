@@ -32,10 +32,11 @@ import app.aria.music.R
 import app.aria.music.image.AriaImage
 import app.aria.music.ui.Formatters
 
-enum class TrackMenuAction { PLAY_NEXT, ADD_TO_QUEUE, LIKE }
+enum class TrackMenuAction { PLAY_NEXT, ADD_TO_QUEUE, LIKE, UNLIKE }
 
 /**
  * One song row shared by Search, Home, Library and the detail pages: artwork, title, artists, duration and an overflow menu.
+ * [liked] shows a heart and turns the menu entry into "Remove like" ([TrackMenuAction.UNLIKE]); the caller owns the state (library.isLiked).
  * [extraActions] are (string resource, callback) pairs appended to the menu (for example "Add to playlist").
  */
 @Composable
@@ -44,6 +45,7 @@ fun TrackRow(
     onClick: () -> Unit,
     onMenu: (TrackMenuAction) -> Unit,
     modifier: Modifier = Modifier,
+    liked: Boolean = false,
     extraActions: List<Pair<Int, () -> Unit>> = emptyList(),
 ) {
     var menu by remember { mutableStateOf(false) }
@@ -58,12 +60,14 @@ fun TrackRow(
             Text(track.title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
             Text(artists, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        if (liked) Icon(AriaIcons.Favorite, stringResource(R.string.track_liked), Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
         track.durationMs?.let { Text(Formatters.duration(it), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
         IconButton({ menu = true }, Modifier.size(48.dp)) { Icon(AriaIcons.MoreVert, stringResource(R.string.track_more, track.title)) }
         DropdownMenu(menu, { menu = false }) {
             DropdownMenuItem({ Text(stringResource(R.string.track_play_next)) }, { menu = false; onMenu(TrackMenuAction.PLAY_NEXT) })
             DropdownMenuItem({ Text(stringResource(R.string.track_add_to_queue)) }, { menu = false; onMenu(TrackMenuAction.ADD_TO_QUEUE) })
-            DropdownMenuItem({ Text(stringResource(R.string.track_like)) }, { menu = false; onMenu(TrackMenuAction.LIKE) })
+            if (liked) DropdownMenuItem({ Text(stringResource(R.string.track_unlike)) }, { menu = false; onMenu(TrackMenuAction.UNLIKE) })
+            else DropdownMenuItem({ Text(stringResource(R.string.track_like)) }, { menu = false; onMenu(TrackMenuAction.LIKE) })
             extraActions.forEach { (label, action) -> DropdownMenuItem({ Text(stringResource(label)) }, { menu = false; action() }) }
         }
     }

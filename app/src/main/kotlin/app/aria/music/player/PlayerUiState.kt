@@ -32,6 +32,8 @@ sealed interface PlayerMessage {
     data object LikeFailed : PlayerMessage
     /** Search history could not be saved, removed or cleared (database error). */
     data object HistoryFailed : PlayerMessage
+    /** A manual Home refresh failed or was impossible (offline); the saved content stays on screen. */
+    data object RefreshFailed : PlayerMessage
 }
 
 internal fun PlaybackState.toUi() = PlayerUiState(

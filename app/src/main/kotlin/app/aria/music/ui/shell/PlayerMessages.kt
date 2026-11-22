@@ -21,5 +21,6 @@ fun PlayerMessage.text(r: Resources): String = when (this) {
     is PlayerMessage.QueueWindowed -> r.getString(R.string.msg_queue_windowed, Formatters.count(queued), Formatters.count(total))
     PlayerMessage.LikeFailed -> r.getString(R.string.msg_like_failed)
     PlayerMessage.HistoryFailed -> r.getString(R.string.msg_history_failed)
+    PlayerMessage.RefreshFailed -> r.getString(R.string.msg_refresh_failed)
     is PlayerMessage.QueueFull -> r.getQuantityString(R.plurals.msg_queue_full, dropped, dropped, Formatters.count(PlayerController.QUEUE_CAP))
 }

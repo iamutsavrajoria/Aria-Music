@@ -2,6 +2,7 @@
 package app.aria.music.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.runtime.Composable
 import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
@@ -24,6 +25,8 @@ import org.junit.Rule
 import org.junit.Test
 
 /** The shell wired to a real PlayerController over a fake engine: the message path from engine event to snackbar. */
+private val NO_HOME: @Composable (onAlbum: (String) -> Unit, onArtist: (String) -> Unit, onPlaylist: (String) -> Unit, onSettings: () -> Unit) -> Unit = { _, _, _, _ -> }
+
 class RootTest {
     @get:Rule val rule = createComposeRule()
     private val target get() = InstrumentationRegistry.getInstrumentation().targetContext
@@ -36,7 +39,7 @@ class RootTest {
     // The snackbar times out on the test clock, so the clock is stepped by hand instead of letting idle-waiting run it past the timeout.
     @Test fun anEngineEventShowsAsASnackbar() {
         rule.mainClock.autoAdvance = false
-        rule.setContent { AriaTestTheme { AriaRoot(controller = controller, miniPlayer = {}) } }
+        rule.setContent { AriaTestTheme { AriaRoot(controller = controller, miniPlayer = {}, home = NO_HOME) } }
         engine.mutableEvents.tryEmit(skipped("Zed", "unavailable"))
         rule.mainClock.advanceTimeBy(1_500)
         rule.onNodeWithText(target.getString(R.string.msg_skipped_unavailable, "Zed")).assertIsDisplayed()
@@ -44,7 +47,7 @@ class RootTest {
 
     @Test fun aNewerMessageReplacesTheOneOnScreenEvenWhenBothArriveAtOnce() {
         rule.mainClock.autoAdvance = false
-        rule.setContent { AriaTestTheme { AriaRoot(controller = controller, miniPlayer = {}) } }
+        rule.setContent { AriaTestTheme { AriaRoot(controller = controller, miniPlayer = {}, home = NO_HOME) } }
         engine.mutableEvents.tryEmit(skipped("Old", "unavailable")); engine.mutableEvents.tryEmit(skipped("New", "network error"))
         rule.mainClock.advanceTimeBy(1_500)
         rule.onNodeWithText(target.getString(R.string.msg_skipped_network, "New")).assertIsDisplayed()
@@ -53,7 +56,7 @@ class RootTest {
 
     @Test fun aNewerMessageReplacesOneAlreadyOnScreen() {
         rule.mainClock.autoAdvance = false
-        rule.setContent { AriaTestTheme { AriaRoot(controller = controller, miniPlayer = {}) } }
+        rule.setContent { AriaTestTheme { AriaRoot(controller = controller, miniPlayer = {}, home = NO_HOME) } }
         engine.mutableEvents.tryEmit(skipped("Old", "unavailable")); rule.mainClock.advanceTimeBy(1_000)
         rule.onNodeWithText(target.getString(R.string.msg_skipped_unavailable, "Old")).assertIsDisplayed()
         engine.mutableEvents.tryEmit(skipped("New", "network error")); rule.mainClock.advanceTimeBy(1_500)
@@ -65,7 +68,7 @@ class RootTest {
         rule.setContent {
             AriaTestTheme {
                 AriaRoot(
-                    controller = controller,
+                    controller = controller, home = NO_HOME,
                     miniPlayer = { onExpand -> Text("MINI", Modifier.clickable(onClick = onExpand)) },
                     nowPlaying = { onBack, _ -> Text("NOWPLAYING", Modifier.clickable(onClick = onBack)) },
                 )
@@ -84,7 +87,7 @@ class RootTest {
         rule.setContent {
             AriaTestTheme {
                 AriaRoot(
-                    controller = controller,
+                    controller = controller, home = NO_HOME,
                     miniPlayer = { onExpand -> Text("MINI", Modifier.clickable(onClick = onExpand)) },
                     nowPlaying = { _, onQueue -> Text("NOWPLAYING", Modifier.clickable(onClick = onQueue)) },
                     queue = { onBack -> Text("QUEUE", Modifier.clickable(onClick = onBack)) },
@@ -106,5 +109,20 @@ class RootTest {
         rule.onNodeWithText(target.getString(R.string.notif_allow)).performClick()
         rule.onNodeWithText(target.getString(R.string.notif_not_now)).performClick()
         assertEquals(1, allowed); assertEquals(1, notNow)
+    }
+
+    @Test fun theHomeSettingsEntryOpensSettingsFullScreen() {
+        rule.setContent {
+            AriaTestTheme {
+                AriaRoot(
+                    controller = controller,
+                    miniPlayer = { Text("MINI") },
+                    home = { _, _, _, onSettings -> Text("HOME", Modifier.clickable(onClick = onSettings)) },
+                )
+            }
+        }
+        rule.onNodeWithText("HOME").performClick()
+        rule.onNodeWithText(target.getString(R.string.coming_soon)).assertIsDisplayed()
+        rule.onNodeWithText("MINI").assertDoesNotExist()
     }
 }

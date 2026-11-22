@@ -9,6 +9,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import app.aria.music.R
 import app.aria.music.ui.common.EmptyState
+import app.aria.music.ui.home.HomeScreen
 import app.aria.music.ui.nowplaying.NowPlayingScreen
 import app.aria.music.ui.queue.QueueScreen
 import app.aria.music.ui.search.SearchScreen
@@ -22,9 +23,18 @@ fun AriaNavHost(
     queue: @Composable (onBack: () -> Unit) -> Unit = { back -> QueueScreen(back) },
     search: @Composable (onAlbum: (String) -> Unit, onArtist: (String) -> Unit, onPlaylist: (String) -> Unit) -> Unit =
         { album, artist, playlist -> SearchScreen(album, artist, playlist) },
+    home: @Composable (onAlbum: (String) -> Unit, onArtist: (String) -> Unit, onPlaylist: (String) -> Unit, onSettings: () -> Unit) -> Unit =
+        { album, artist, playlist, settings -> HomeScreen(album, artist, playlist, settings) },
 ) {
     NavHost(nav, startDestination = HomeRoute, modifier = modifier) {
-        composable<HomeRoute> { Placeholder(R.string.home_placeholder) }
+        composable<HomeRoute> {
+            home(
+                { nav.navigate(AlbumRoute(it)) },
+                { nav.navigate(ArtistRoute(it)) },
+                { nav.navigate(PlaylistRoute(it, local = false)) },
+                { nav.navigate(SettingsRoute) { launchSingleTop = true } },
+            )
+        }
         composable<SearchRoute> {
             search(
                 { nav.navigate(AlbumRoute(it)) },
@@ -36,6 +46,8 @@ fun AriaNavHost(
         composable<AlbumRoute> { Placeholder(R.string.coming_soon) }
         composable<ArtistRoute> { Placeholder(R.string.coming_soon) }
         composable<PlaylistRoute> { Placeholder(R.string.coming_soon) }
+        // Temporary until Task 21 builds the Settings screen.
+        composable<SettingsRoute> { Placeholder(R.string.coming_soon) }
         composable<NowPlayingRoute> { nowPlaying({ nav.popBackStack() }, { nav.navigate(QueueRoute) { launchSingleTop = true } }) }
         composable<QueueRoute> { queue { nav.popBackStack() } }
         composable<LibraryRoute> { Placeholder(R.string.library_placeholder) }
