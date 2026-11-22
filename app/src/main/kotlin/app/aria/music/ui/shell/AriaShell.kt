@@ -35,6 +35,7 @@ import app.aria.music.player.PlayerMessage
 import app.aria.music.ui.miniplayer.MiniPlayerHost
 import app.aria.music.ui.nowplaying.NowPlayingScreen
 import app.aria.music.ui.queue.QueueScreen
+import app.aria.music.ui.search.SearchScreen
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
@@ -102,12 +103,13 @@ private val FULL_SCREEN_ROUTES = listOf(NowPlayingRoute::class, QueueRoute::clas
 
 @Composable
 fun AriaRoot(
-    legacySearch: @Composable () -> Unit,
     controller: PlayerController = hiltViewModel<ShellViewModel>().controller,
     /** Overridable so tests without a Hilt activity can swap out the Hilt-backed mini player. */
     miniPlayer: @Composable (onExpand: () -> Unit) -> Unit = { MiniPlayerHost(onExpand = it) },
     nowPlaying: @Composable (onBack: () -> Unit, onOpenQueue: () -> Unit) -> Unit = { back, queue -> NowPlayingScreen(back, queue) },
     queue: @Composable (onBack: () -> Unit) -> Unit = { back -> QueueScreen(back) },
+    search: @Composable (onAlbum: (String) -> Unit, onArtist: (String) -> Unit, onPlaylist: (String) -> Unit) -> Unit =
+        { album, artist, playlist -> SearchScreen(album, artist, playlist) },
 ) {
     val nav = rememberNavController()
     val snackbar = remember { SnackbarHostState() }
@@ -125,5 +127,5 @@ fun AriaRoot(
         snackbarHost = snackbar,
         miniPlayer = { miniPlayer { nav.navigate(NowPlayingRoute) { launchSingleTop = true } } },
         miniPlayerVisible = !fullScreen,
-    ) { padding -> AriaNavHost(nav, legacySearch, Modifier.padding(padding), nowPlaying, queue) }
+    ) { padding -> AriaNavHost(nav, Modifier.padding(padding), nowPlaying, queue, search) }
 }

@@ -85,10 +85,10 @@ def test_new_violation_fails_even_with_baseline_present(tmp_path):
     assert code == 1 and "New.kt" in out and "Legacy.kt" not in out, out
 
 
-def test_real_baseline_contains_only_player_screen():
+def test_real_baseline_is_empty():
     entries = [l.strip() for l in (ROOT / "scripts" / "ui-strings-baseline.txt").read_text().splitlines()
                if l.strip() and not l.startswith("#")]
-    assert entries == ["app/src/main/kotlin/app/aria/music/PlayerScreen.kt"], entries
+    assert entries == [], entries
 
 
 def test_escape_requires_a_non_empty_reason(tmp_path):

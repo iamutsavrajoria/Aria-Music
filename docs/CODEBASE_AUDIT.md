@@ -62,7 +62,7 @@ Its intended purpose is to combine:
 | Endless radio | Implemented | Default ON; batch 25, cap 500, trigger below 5 remaining |
 | Sleep timer, skip silence, loudness | Implemented | Settings are in memory only (no persistence yet) |
 | Play history and resume | Implemented | History at 30 s, position saved every 15 s |
-| Player screen | Basic | `PlayerScreen.kt`; replaced by the UI shell |
+| Player screen | Done | Legacy `PlayerScreen.kt` removed in Task 16; the UI shell (search, mini player, Now Playing, queue) replaces it |
 | Home, Library, Album/Artist/Playlist pages | Not implemented | Sub-project 3 |
 | Navigation, mini player, queue screen, settings screen, onboarding | Not implemented | Sub-project 3 |
 | Spotify provider and matching | Not implemented | Sub-projects 5 |
@@ -93,9 +93,9 @@ Seven Gradle modules are included in `settings.gradle.kts`: `:core`, `:domain`, 
 
 ```text
 Aria-Music/
-├── app/                      Hilt wiring, MainActivity, PlayerScreen
+├── app/                      Hilt wiring, MainActivity, ui/
 │   └── src/{main,androidTest}/kotlin/app/aria/music/
-│       AriaApp.kt, MainActivity.kt, PlayerScreen.kt,
+│       AriaApp.kt, MainActivity.kt,
 │       ConnectivityNetworkMonitor.kt, di/AppModule.kt
 │       androidTest: HiltTestRunner.kt, HiltWiringTest.kt
 ├── core/                     crash formatting, signed registry, cipher-config verifier
@@ -134,8 +134,7 @@ This is the actual high-level structure, not a proposed replacement.
 | File | Responsibility |
 |---|---|
 | `AriaApp.kt` | Application; Hilt; implements `PlaybackEngineProvider`; creates the engine and the service starter |
-| `MainActivity.kt` | Hosts `PlayerScreen` |
-| `PlayerScreen.kt` | Search, play, basic transport, queue controls, radio toggle, sleep timer (temporary; replaced in sub-project 3) |
+| `MainActivity.kt` | Hosts `AriaRoot` (the UI shell) |
 | `ConnectivityNetworkMonitor.kt` | Implements `NetworkMonitor` |
 | `di/AppModule.kt` | Hilt bindings: database, sources, stores, engine inputs |
 

@@ -30,6 +30,8 @@ sealed interface PlayerMessage {
     data class QueueFull(val dropped: Int) : PlayerMessage
     /** A like/unlike could not be saved (database error). */
     data object LikeFailed : PlayerMessage
+    /** Search history could not be saved, removed or cleared (database error). */
+    data object HistoryFailed : PlayerMessage
 }
 
 internal fun PlaybackState.toUi() = PlayerUiState(

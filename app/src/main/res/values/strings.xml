@@ -18,6 +18,7 @@
     <string name="msg_skipped_other">Skipped %1$s: could not play</string>
     <string name="msg_too_many_failures">Stopped after several tracks failed in a row</string>
     <string name="msg_like_failed">Could not update your library</string>
+    <string name="msg_history_failed">Could not update your search history</string>
     <string name="msg_queue_windowed">Queued %1$s of %2$s songs, starting from the one you tapped</string>
     <string name="notif_title">Show playback controls?</string>
     <string name="notif_body">Android needs your permission to show the player in the notification shade and on the lock screen. Music plays either way.</string>
@@ -61,4 +62,20 @@
     <string name="np_nothing_playing">Nothing is playing</string>
     <string name="np_offline_banner">Waiting for network</string>
     <string name="np_error_banner">Playback stopped</string>
+    <string name="search_hint">Search songs, albums, artists</string>
+    <string name="search_clear_history">Clear history</string>
+    <string name="search_remove_history">Remove %1$s from history</string>
+    <string name="search_recent">Recent searches</string>
+    <string name="search_section_songs">Songs</string>
+    <string name="search_section_albums">Albums</string>
+    <string name="search_section_artists">Artists</string>
+    <string name="search_section_playlists">Playlists</string>
+    <string name="search_empty">No results</string>
+    <string name="search_clear_query">Clear search text</string>
+    <string name="track_more">More actions for %1$s</string>
+    <string name="track_play_next">Play next</string>
+    <string name="track_add_to_queue">Add to queue</string>
+    <string name="track_like">Like</string>
+    <string name="track_unlike">Remove like</string>
+    <string name="coming_soon">Coming soon</string>
 </resources>
