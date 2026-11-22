@@ -6472,3 +6472,7 @@ Region-specific error wording; API 26-only failures are found at slice boundarie
 
 ### Controller note: Task 14 fix round (CI green 4d419d8)
 - `np_sleep_in_minutes` is now a PLURAL (`R.plurals.np_sleep_in_minutes`, use `pluralStringResource(R.plurals.np_sleep_in_minutes, m, m)`); Task 21 (Settings) text referencing it as a string must use the plural. `PlayerController.notify()` + `PlayerMessage.LikeFailed` exist for ViewModels to surface non-blocking errors (reuse in Tasks 16-22). Intermittent infra flake: Robolectric android-all download failure in verify — rerun once.
+
+### Controller note: Task 15 review (PASS, CI green eaa4a5a)
+- DEVICE CHECK (add to docs/manual-device-checklist.md in Task 24): edge-to-edge/insets. targetSdk 36 forces edge-to-edge but no enableEdgeToEdge call exists; QueueScreen adds `statusBarsPadding()` inside a Scaffold that already applies innerPadding (possible doubled top gap), NowPlaying does not; LazyColumns have no bottom inset/contentPadding when the nav bar is hidden. Decide ONE app-wide inset policy at Task 24 after device feedback; new screens (16-22) must not add their own statusBarsPadding.
+- Polish (Task 24): current-row semantics (title likely read twice; add selected/state description + non-colour cue), scroll-to-current on open, remove the printToString diagnostic in QueueTest, stray 12dp gap from DropdownMenu in the Row, missing tests (Not now, Move-down disabled at last row, at-limit header text, system back).
