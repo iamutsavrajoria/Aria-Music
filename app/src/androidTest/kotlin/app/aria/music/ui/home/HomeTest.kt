@@ -19,7 +19,9 @@ class HomeTest {
     private val actions = HomeActions(
         { l, i -> log += "play:${l.size}:$i" }, { log += "album:$it" }, { log += "artist:$it" }, { log += "playlist:$it" }, { log += "refresh" }, { log += "settings" }, { t, a -> log += "menu:${t.title}:$a" },
     )
-    private val shelf = Shelf("Fresh picks", "For you", listOf(BrowseItem.Song(Samples.track(1)), BrowseItem.Album(Samples.album(2)), BrowseItem.Artist(Samples.artist(3)), BrowseItem.Playlist(Samples.playlist(4))))
+    // Two tiles per shelf fit the phone width, so no test has to scroll a row sideways.
+    private val shelf = Shelf("Fresh picks", "For you", listOf(BrowseItem.Song(Samples.track(1)), BrowseItem.Album(Samples.album(2))))
+    private val more = Shelf("More to explore", null, listOf(BrowseItem.Artist(Samples.artist(3)), BrowseItem.Playlist(Samples.playlist(4))))
     private fun content(vararg shelves: ShelfState, outdated: Boolean = false, refreshFailed: Boolean = false) = RemoteSection.Content(shelves.toList(), outdated, refreshFailed)
     private fun state(remote: RemoteSection, quick: List<Track> = Samples.tracks(2, from = 20), recent: List<Track> = Samples.tracks(1, from = 9), liked: Set<TrackId> = emptySet()) =
         HomeUiState(quick, recent, remote, refreshing = false, liked = liked)
@@ -27,22 +29,23 @@ class HomeTest {
     private fun scrollList(to: SemanticsMatcher) { rule.onNodeWithTag(TAG_HOME_LIST).performScrollToNode(to) }
 
     @Test fun localAndRemoteSectionsRenderAndNavigate() {
-        show(state(content(ShelfState.Ready(shelf))))
+        show(state(content(ShelfState.Ready(shelf), ShelfState.Ready(more))))
         rule.onNodeWithText(str(R.string.home_quick_picks)).assertExists(); rule.onNodeWithText("Fresh picks").assertExists()
         rule.onNodeWithTag("home:quick:0").performClick()
-        rule.onNodeWithTag("home:shelf:0").performScrollToNode(hasText("Playlist 4"))
-        rule.onNodeWithText("Song 1").performClick(); rule.onNodeWithText("Album 2").performClick(); rule.onNodeWithText("Artist 3").performClick(); rule.onNodeWithText("Playlist 4").performClick()
-        scrollList(hasText(str(R.string.home_recently_played)))
+        scrollList(hasTestTag("home:shelf:0")); rule.onNodeWithText("Song 1").performClick(); rule.onNodeWithText("Album 2").performClick()
+        scrollList(hasTestTag("home:shelf:1")); rule.onNodeWithText("Artist 3").performClick(); rule.onNodeWithText("Playlist 4").performClick()
+        scrollList(hasTestTag("home:recent:0"))
         rule.onNodeWithText(str(R.string.home_recently_played)).assertExists()
-        scrollList(hasTestTag("home:recent:0")); rule.onNodeWithTag("home:recent:0").performClick()
+        rule.onNodeWithTag("home:recent:0").performClick()
         assertEquals(listOf("play:2:0", "play:1:0", "album:MPREb_2", "artist:UC3", "playlist:PL4", "play:1:0"), log)
     }
 
     @Test fun tilesAnnounceTheirTypeToTalkBack() {
-        show(state(content(ShelfState.Ready(shelf))))
-        rule.onNodeWithTag("home:shelf:0").performScrollToNode(hasText("Playlist 4"))
+        show(state(content(ShelfState.Ready(shelf), ShelfState.Ready(more))))
+        scrollList(hasTestTag("home:shelf:0"))
         rule.onNode(hasContentDescription(str(R.string.browse_desc_song, "Song 1"))).assertExists()
         rule.onNode(hasContentDescription(str(R.string.browse_desc_album, "Album 2"))).assertExists()
+        scrollList(hasTestTag("home:shelf:1"))
         rule.onNode(hasContentDescription(str(R.string.browse_desc_artist, "Artist 3"))).assertExists()
         rule.onNode(hasContentDescription(str(R.string.browse_desc_playlist, "Playlist 4"))).assertExists()
     }

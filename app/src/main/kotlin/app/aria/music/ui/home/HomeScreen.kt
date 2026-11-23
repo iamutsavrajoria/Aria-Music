@@ -53,6 +53,8 @@ import app.aria.music.ui.common.OfflineState
 import app.aria.music.ui.common.TrackMenuAction
 import app.aria.music.ui.common.TrackRow
 
+private val STATE_HEIGHT = 280.dp
+
 const val TAG_HOME_LIST = "home:list"
 const val TAG_HOME_STALE = "home:stale"
 const val TAG_HOME_SHELF_FAILED = "home:shelf-failed"
@@ -108,9 +110,10 @@ private fun androidx.compose.foundation.lazy.LazyListScope.localSection(
 
 private fun androidx.compose.foundation.lazy.LazyListScope.remoteSection(remote: RemoteSection, actions: HomeActions) {
     when (remote) {
-        RemoteSection.Loading -> item(key = "remote:loading") { Box(Modifier.fillMaxWidth().height(200.dp)) { LoadingState() } }
-        RemoteSection.Error -> item(key = "remote:error") { ErrorState(actions.onRefresh, Modifier.fillMaxWidth().heightIn(min = 240.dp)) }
-        RemoteSection.Offline -> item(key = "remote:offline") { OfflineState(actions.onRefresh, Modifier.fillMaxWidth().heightIn(min = 240.dp)) }
+        RemoteSection.Loading -> item(key = "remote:loading") { Box(Modifier.fillMaxWidth().height(STATE_HEIGHT)) { LoadingState() } }
+        // The shared states fill their parent and scroll on their own: inside a LazyColumn they need a bounded height.
+        RemoteSection.Error -> item(key = "remote:error") { ErrorState(actions.onRefresh, Modifier.fillMaxWidth().height(STATE_HEIGHT)) }
+        RemoteSection.Offline -> item(key = "remote:offline") { OfflineState(actions.onRefresh, Modifier.fillMaxWidth().height(STATE_HEIGHT)) }
         is RemoteSection.Content -> {
             if (remote.outdated) item(key = "remote:stale") {
                 Row(Modifier.fillMaxWidth().padding(start = 16.dp).testTag(TAG_HOME_STALE), verticalAlignment = Alignment.CenterVertically) {

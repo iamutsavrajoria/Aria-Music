@@ -116,9 +116,11 @@ class HomeViewModelTest {
 
     @Test fun queueActionsUseTheController() = runTest(dispatcher) {
         val e = Env(backgroundScope); val songs = Samples.tracks(3)
-        e.engine.mutableState.value = PlaybackState(queue = songs.mapIndexed { i, t -> QueueItem(100L + i, t) }, currentIndex = 0); advanceUntilIdle()
-        e.vm.playNext(songs[1]); e.vm.addToQueue(Samples.track(9)); advanceUntilIdle()
-        assertTrue("playNext" in e.engine.calls); assertEquals(listOf(listOf(Samples.track(9))), e.engine.addedToEnd)
+        e.vm.play(songs, 1); advanceUntilIdle()
+        // With a queue present, "add to queue" appends instead of starting playback.
+        e.engine.mutableState.value = PlaybackState(queue = songs.mapIndexed { i, t -> QueueItem(100L + i, t) }, currentIndex = 1); advanceUntilIdle()
+        e.vm.playNext(songs[0]); e.vm.addToQueue(songs[2]); advanceUntilIdle()
+        assertTrue("playNext" in e.engine.calls); assertEquals(listOf(listOf(songs[2])), e.engine.addedToEnd); assertEquals(1, e.engine.playNowCalls.size)
     }
 
     @Test fun aLongSectionPlaysThroughTheWindowRule() = runTest(dispatcher) {
