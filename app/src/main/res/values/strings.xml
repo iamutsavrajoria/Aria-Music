@@ -110,4 +110,17 @@
     <string name="browse_desc_album">Album, %1$s</string>
     <string name="browse_desc_artist">Artist, %1$s</string>
     <string name="browse_desc_playlist">Playlist, %1$s</string>
+    <string name="detail_play">Play</string>
+    <string name="detail_shuffle">Shuffle</string>
+    <string name="detail_play_named">Play %1$s</string>
+    <string name="detail_shuffle_named">Shuffle %1$s</string>
+    <string name="detail_add_to_queue_named">Add %1$s to queue</string>
+    <string name="detail_save">Save to library</string>
+    <string name="detail_unsave">Remove from library</string>
+    <string name="detail_follow">Follow</string>
+    <string name="detail_unfollow">Unfollow</string>
+    <string name="detail_other_versions">Other versions</string>
+    <string name="detail_about">About</string>
+    <string name="detail_more_failed">Could not load more songs</string>
+    <string name="detail_loading_more">Loading more songs</string>
 </resources>

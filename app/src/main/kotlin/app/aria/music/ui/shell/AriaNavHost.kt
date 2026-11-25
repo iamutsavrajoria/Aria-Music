@@ -7,8 +7,12 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.toRoute
 import app.aria.music.R
 import app.aria.music.ui.common.EmptyState
+import app.aria.music.ui.detail.AlbumScreen
+import app.aria.music.ui.detail.ArtistScreen
+import app.aria.music.ui.detail.PlaylistScreen
 import app.aria.music.ui.home.HomeScreen
 import app.aria.music.ui.library.LibraryScreen
 import app.aria.music.ui.nowplaying.NowPlayingScreen
@@ -43,10 +47,21 @@ fun AriaNavHost(
                 { nav.navigate(PlaylistRoute(it, local = false)) },
             )
         }
-        // Temporary destinations so the search callbacks have somewhere to go; Task 19 replaces them with the detail pages.
-        composable<AlbumRoute> { Placeholder(R.string.coming_soon) }
-        composable<ArtistRoute> { Placeholder(R.string.coming_soon) }
-        composable<PlaylistRoute> { Placeholder(R.string.coming_soon) }
+        composable<AlbumRoute> {
+            AlbumScreen(onBack = { nav.popBackStack() }, onAlbum = { nav.navigate(AlbumRoute(it)) })
+        }
+        composable<ArtistRoute> {
+            ArtistScreen(
+                onBack = { nav.popBackStack() },
+                onAlbum = { nav.navigate(AlbumRoute(it)) },
+                onArtist = { nav.navigate(ArtistRoute(it)) },
+                onPlaylist = { nav.navigate(PlaylistRoute(it, local = false)) },
+            )
+        }
+        composable<PlaylistRoute> { entry ->
+            // Temporary for local playlists until Task 20; the remote page is real.
+            if (entry.toRoute<PlaylistRoute>().local) Placeholder(R.string.coming_soon) else PlaylistScreen(onBack = { nav.popBackStack() })
+        }
         // Temporary until Task 21 builds the Settings screen.
         composable<SettingsRoute> { Placeholder(R.string.coming_soon) }
         composable<NowPlayingRoute> { nowPlaying({ nav.popBackStack() }, { nav.navigate(QueueRoute) { launchSingleTop = true } }) }
