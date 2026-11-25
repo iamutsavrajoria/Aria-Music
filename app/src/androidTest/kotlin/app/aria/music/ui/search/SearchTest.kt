@@ -83,4 +83,11 @@ class SearchTest {
     @Test fun loadingState() { show(SearchUiState("q", SearchMode.Loading)); rule.onNodeWithTag("state:loading").assertIsDisplayed() }
 
     @Test fun survivesPseudolocaleAndBigFonts() { show(SearchUiState("q", SearchMode.Results(results)), pseudo = true, fontScale = 2f); rule.onNodeWithText("Song 1").assertExists() }
+
+    @Test fun likedResultSongsShowTheirStateAndOfferUnlike() {
+        show(SearchUiState("q", SearchMode.Results(results), liked = setOf(Samples.track(1).id)))
+        rule.onAllNodesWithContentDescription(str(R.string.track_liked)).assertCountEquals(1)
+        rule.onNodeWithContentDescription(str(R.string.track_more, "Song 1")).performClick(); rule.onNodeWithText(str(R.string.track_unlike)).performClick()
+        assertEquals(listOf("menu:Song 1:UNLIKE"), log)
+    }
 }

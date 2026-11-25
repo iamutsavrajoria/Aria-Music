@@ -13,4 +13,8 @@
         <item quantity="one">%1$s song</item>
         <item quantity="other">%1$s songs</item>
     </plurals>
+    <plurals name="library_playlist_songs">
+        <item quantity="one">%1$d song</item>
+        <item quantity="other">%1$d songs</item>
+    </plurals>
 </resources>

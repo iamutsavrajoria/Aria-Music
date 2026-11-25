@@ -33,7 +33,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -72,8 +74,14 @@ data class HomeActions(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeContent(state: HomeUiState, actions: HomeActions, modifier: Modifier = Modifier) {
+    // Pull to refresh has no TalkBack equivalent, so the list also offers Refresh as a custom accessibility action.
+    val refreshLabel = stringResource(R.string.home_refresh)
     PullToRefreshBox(state.refreshing, actions.onRefresh, modifier.fillMaxSize()) {
-        LazyColumn(Modifier.fillMaxSize().testTag(TAG_HOME_LIST)) {
+        LazyColumn(
+            Modifier.fillMaxSize().testTag(TAG_HOME_LIST).semantics {
+                customActions = listOf(CustomAccessibilityAction(refreshLabel) { actions.onRefresh(); true })
+            },
+        ) {
             item(key = "header") {
                 Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(stringResource(R.string.app_name), Modifier.weight(1f).semantics { heading() }, style = MaterialTheme.typography.headlineSmall)

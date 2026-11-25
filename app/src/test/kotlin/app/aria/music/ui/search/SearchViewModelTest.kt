@@ -7,6 +7,7 @@ import app.aria.music.player.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.*
 import kotlin.test.*
@@ -137,5 +138,28 @@ class SearchViewModelTest {
         backgroundScope.launch { vm.state.collect { } }
         vm.onQueryChange("a"); advanceTimeBy(400); runCurrent(); vm.submit("a"); advanceUntilIdle()
         assertEquals(SearchMode.Error, vm.state.value.mode)
+    }
+
+    @Test fun resultSongsCarryTheirLikedStateFromTheLibrary() = runTest(dispatcher) {
+        val e = Env(backgroundScope); e.search.searchResult = Result.success(results); e.library.setLiked(results.songs[1], true)
+        e.vm.submit("q"); advanceUntilIdle()
+        assertEquals(setOf(results.songs[1].id), e.vm.state.value.liked)
+        e.vm.toggleLike(results.songs[0], true); advanceUntilIdle()
+        assertEquals(results.songs.map { it.id }.toSet(), e.vm.state.value.liked)
+        e.vm.toggleLike(results.songs[0], false); advanceUntilIdle()
+        assertEquals(setOf(results.songs[1].id), e.vm.state.value.liked)
+        assertTrue(e.library.isInLibrary(results.songs[0].id).first())   // unliking keeps the song in the library
+    }
+
+    @Test fun aFailingLikedLookupKeepsTheResultsAndReadsAsNotLiked() = runTest(dispatcher) {
+        val broken = object : LibraryRepository by FakeLibraryRepository() { override fun isLiked(id: TrackId) = flow<Boolean> { throw IllegalStateException("db") } }
+        val e = Env(backgroundScope, libraryRepo = broken); e.search.searchResult = Result.success(results); e.vm.submit("q"); advanceUntilIdle()
+        assertEquals(SearchMode.Results(results), e.vm.state.value.mode); assertEquals(emptySet(), e.vm.state.value.liked)
+    }
+
+    @Test fun likedLookupDoesNotSearchAgain() = runTest(dispatcher) {
+        val e = Env(backgroundScope); e.search.searchResult = Result.success(results); e.vm.submit("q"); advanceUntilIdle()
+        e.vm.toggleLike(results.songs[0], true); advanceUntilIdle()
+        assertEquals(listOf("q"), e.search.searchQueries)
     }
 }

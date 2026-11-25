@@ -48,9 +48,9 @@ class StatesTest {
     }
 
     @Test fun emptyShowsTitleAndOptionalBody() {
-        rule.setContent { AriaTestTheme { EmptyState(title = R.string.coming_soon, body = R.string.library_placeholder) } }
+        rule.setContent { AriaTestTheme { EmptyState(title = R.string.coming_soon, body = R.string.home_recent_hint) } }
         rule.onNodeWithTag(TAG_EMPTY).assertIsDisplayed()
-        rule.onNodeWithText(str(R.string.coming_soon)).assertIsDisplayed(); rule.onNodeWithText(str(R.string.library_placeholder)).assertIsDisplayed()
+        rule.onNodeWithText(str(R.string.coming_soon)).assertIsDisplayed(); rule.onNodeWithText(str(R.string.home_recent_hint)).assertIsDisplayed()
     }
 
     @Test fun loadingHasADescription() {

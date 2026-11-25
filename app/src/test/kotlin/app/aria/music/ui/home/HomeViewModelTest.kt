@@ -6,6 +6,8 @@ import app.aria.domain.testing.*
 import app.aria.music.player.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.*
 import kotlin.test.*
@@ -16,12 +18,12 @@ class HomeViewModelTest {
     @BeforeTest fun setMain() = Dispatchers.setMain(dispatcher)
     @AfterTest fun resetMain() = Dispatchers.resetMain()
 
-    private class Env(val scope: kotlinx.coroutines.CoroutineScope, online: Boolean = true, libraryRepo: LibraryRepository? = null) {
+    private class Env(val scope: kotlinx.coroutines.CoroutineScope, online: Boolean = true, libraryRepo: LibraryRepository? = null, homeRepo: HomeRepository? = null) {
         val home = FakeHomeRepository(); val library = FakeLibraryRepository(); val engine = FakePlaybackEngine(); val network = FakeNetworkMonitor(online)
         val controller = PlayerController(engine, ServiceLauncher { }, scope)
         val messages = mutableListOf<PlayerMessage>()
         val vm by lazy {
-            HomeViewModel(home, libraryRepo ?: library, controller, network).also {
+            HomeViewModel(homeRepo ?: home, libraryRepo ?: library, controller, network).also {
                 scope.launch { it.state.collect { } }; scope.launch { controller.messages.collect { messages += it } }
             }
         }
@@ -134,5 +136,35 @@ class HomeViewModelTest {
         val e = Env(backgroundScope); e.home.recent.value = Samples.tracks(1, from = 7)
         e.library.setLiked(Samples.track(7), true)
         e.vm; advanceUntilIdle(); assertEquals(setOf(Samples.track(7).id), e.vm.state.value.liked)
+    }
+
+    @Test fun anUpstreamThrowInTheSharedFlowsDoesNotCrashTheState() = runTest(dispatcher) {
+        val base = FakeHomeRepository()
+        val throwing = object : HomeRepository by base {
+            override fun quickPicks(limit: Int) = flow<List<Track>> { throw IllegalStateException("db") }
+            override fun recentlyPlayed(limit: Int) = flow<List<Track>> { throw IllegalStateException("db") }
+            override fun remote() = flow<HomeRemote?> { throw IllegalStateException("db") }
+        }
+        val e = Env(backgroundScope, homeRepo = throwing); e.vm; advanceUntilIdle()
+        val s = e.vm.state.value
+        assertEquals(emptyList(), s.quickPicks); assertEquals(emptyList(), s.recent); assertTrue(s.remote !is RemoteSection.Offline)   // the state kept flowing instead of the shared flow dying
+    }
+
+    @Test fun aFailingLikedLookupReadsAsNotLikedAndKeepsTheSongs() = runTest(dispatcher) {
+        val broken = object : LibraryRepository by FakeLibraryRepository() { override fun isLiked(id: TrackId) = flow<Boolean> { throw IllegalStateException("db") } }
+        val e = Env(backgroundScope, libraryRepo = broken); e.home.quick.value = Samples.tracks(2); e.vm; advanceUntilIdle()
+        assertEquals(2, e.vm.state.value.quickPicks.size); assertEquals(emptySet(), e.vm.state.value.liked)
+    }
+
+    @Test fun quickPicksAndRecentlyPlayedAreCollectedOnce() = runTest(dispatcher) {
+        var quickCollections = 0; var recentCollections = 0
+        val base = FakeHomeRepository()
+        val counting = object : HomeRepository by base {
+            override fun quickPicks(limit: Int) = base.quickPicks(limit).onStart { quickCollections++ }
+            override fun recentlyPlayed(limit: Int) = base.recentlyPlayed(limit).onStart { recentCollections++ }
+        }
+        val e = Env(backgroundScope, homeRepo = counting); e.vm; advanceUntilIdle()
+        base.quick.value = Samples.tracks(2); advanceUntilIdle()
+        assertEquals(1, quickCollections); assertEquals(1, recentCollections); assertEquals(2, e.vm.state.value.quickPicks.size)
     }
 }

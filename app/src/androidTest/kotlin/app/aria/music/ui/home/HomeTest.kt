@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package app.aria.music.ui.home
 
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
@@ -106,5 +107,13 @@ class HomeTest {
     @Test fun survivesPseudolocaleAndBigFonts() {
         show(state(content(ShelfState.Ready(shelf), outdated = true, refreshFailed = true)), pseudo = true, fontScale = 2f)
         rule.onNodeWithTag(TAG_HOME_LIST).assertExists(); rule.onNodeWithTag(TAG_HOME_STALE).assertExists()
+    }
+
+    @Test fun refreshIsAvailableToTalkBackAsACustomAction() {
+        show(state(content(ShelfState.Ready(shelf))))
+        val custom = rule.onNodeWithTag(TAG_HOME_LIST).fetchSemanticsNode().config[SemanticsActions.CustomActions]
+        val refresh = custom.single { it.label == str(R.string.home_refresh) }
+        rule.runOnIdle { refresh.action() }
+        assertEquals(listOf("refresh"), log)
     }
 }

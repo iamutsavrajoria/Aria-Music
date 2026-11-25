@@ -44,9 +44,11 @@ import app.aria.domain.ArtistRef
 import app.aria.domain.PlaylistRef
 import app.aria.domain.SearchResults
 import app.aria.domain.Track
+import app.aria.domain.TrackId
 import app.aria.music.R
 import app.aria.music.image.AriaImage
 import app.aria.music.ui.common.AriaIcons
+import app.aria.music.ui.common.BrowseRow
 import app.aria.music.ui.common.EmptyState
 import app.aria.music.ui.common.ErrorState
 import app.aria.music.ui.common.LoadingState
@@ -109,7 +111,7 @@ fun SearchContent(state: SearchUiState, actions: SearchActions, modifier: Modifi
             is SearchMode.Idle -> SuggestionList(emptyList(), mode.recent, actions)
             is SearchMode.Suggestions -> SuggestionList(mode.suggestions, mode.recent, actions)
             SearchMode.Loading -> LoadingState()
-            is SearchMode.Results -> ResultsList(mode.results, actions)
+            is SearchMode.Results -> ResultsList(mode.results, state.liked, actions)
             SearchMode.Empty -> EmptyState(R.string.search_empty)
             SearchMode.Error -> ErrorState(actions.onRetry)
             SearchMode.Offline -> OfflineState(actions.onRetry)
@@ -168,7 +170,7 @@ private fun SuggestionList(suggestions: List<String>, recent: List<String>, acti
 }
 
 @Composable
-private fun ResultsList(results: SearchResults, actions: SearchActions) {
+private fun ResultsList(results: SearchResults, liked: Set<TrackId>, actions: SearchActions) {
     val rows = remember(results) { resultRows(results) }
     LazyColumn(Modifier.fillMaxSize().testTag("search:results")) {
         items(rows, key = { it.key }) { row ->
@@ -178,7 +180,7 @@ private fun ResultsList(results: SearchResults, actions: SearchActions) {
                     Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp).semantics { heading() },
                     style = MaterialTheme.typography.titleMedium,
                 )
-                is ResultRow.Song -> TrackRow(row.track, { actions.onPlaySong(results.songs, row.index) }, { actions.onTrackMenu(row.track, it) })
+                is ResultRow.Song -> TrackRow(row.track, { actions.onPlaySong(results.songs, row.index) }, { actions.onTrackMenu(row.track, it) }, liked = row.track.id in liked)
                 is ResultRow.Album -> BrowseRow(
                     row.album.thumbnailUrl, row.album.title,
                     (row.album.artists + listOfNotNull(row.album.year?.toString())).joinToString(stringResource(R.string.artist_separator)),
@@ -187,22 +189,6 @@ private fun ResultsList(results: SearchResults, actions: SearchActions) {
                 is ResultRow.Artist -> BrowseRow(row.artist.thumbnailUrl, row.artist.name, null, round = true, R.string.browse_desc_artist, Modifier.testTag("search:artist:${row.artist.id}")) { actions.onOpenArtist(row.artist.id) }
                 is ResultRow.Playlist -> BrowseRow(row.playlist.thumbnailUrl, row.playlist.title, row.playlist.subtitle, round = false, R.string.browse_desc_playlist, Modifier.testTag("search:playlist:${row.playlist.id}")) { actions.onOpenPlaylist(row.playlist.id) }
             }
-        }
-    }
-}
-
-@Composable
-private fun BrowseRow(thumbnailUrl: String?, title: String, subtitle: String?, round: Boolean, @StringRes typeDescription: Int, modifier: Modifier, onClick: () -> Unit) {
-    val description = stringResource(typeDescription, title)
-    Row(
-        modifier.semantics(mergeDescendants = true) { contentDescription = description }.fillMaxWidth().heightIn(min = 56.dp).clickable(onClick = onClick).padding(horizontal = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        AriaImage(thumbnailUrl, null, Modifier.size(40.dp).clip(RoundedCornerShape(if (round) 20.dp else 6.dp)))
-        Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
-            Text(title, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyLarge)
-            if (!subtitle.isNullOrBlank()) Text(subtitle, maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

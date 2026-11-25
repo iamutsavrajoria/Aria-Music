@@ -10,6 +10,7 @@ import androidx.navigation.compose.composable
 import app.aria.music.R
 import app.aria.music.ui.common.EmptyState
 import app.aria.music.ui.home.HomeScreen
+import app.aria.music.ui.library.LibraryScreen
 import app.aria.music.ui.nowplaying.NowPlayingScreen
 import app.aria.music.ui.queue.QueueScreen
 import app.aria.music.ui.search.SearchScreen
@@ -50,7 +51,13 @@ fun AriaNavHost(
         composable<SettingsRoute> { Placeholder(R.string.coming_soon) }
         composable<NowPlayingRoute> { nowPlaying({ nav.popBackStack() }, { nav.navigate(QueueRoute) { launchSingleTop = true } }) }
         composable<QueueRoute> { queue { nav.popBackStack() } }
-        composable<LibraryRoute> { Placeholder(R.string.library_placeholder) }
+        composable<LibraryRoute> {
+            LibraryScreen(
+                onAlbum = { nav.navigate(AlbumRoute(it)) },
+                onArtist = { nav.navigate(ArtistRoute(it)) },
+                onPlaylist = { nav.navigate(PlaylistRoute(it, local = true)) },
+            )
+        }
     }
 }
 

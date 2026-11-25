@@ -9,8 +9,10 @@ import app.aria.domain.SearchHistoryRepository
 import app.aria.domain.SearchRepository
 import app.aria.domain.SearchResults
 import app.aria.domain.Track
+import app.aria.domain.TrackId
 import app.aria.music.player.PlayerController
 import app.aria.music.player.PlayerMessage
+import app.aria.music.ui.common.likedAmong
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -25,6 +27,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -40,7 +43,8 @@ sealed interface SearchMode {
     data object Offline : SearchMode
 }
 
-data class SearchUiState(val query: String, val mode: SearchMode)
+/** [liked] holds the ids of the visible result songs that are liked. */
+data class SearchUiState(val query: String, val mode: SearchMode, val liked: Set<TrackId> = emptySet())
 
 @HiltViewModel
 class SearchViewModel @Inject constructor(
@@ -71,6 +75,8 @@ class SearchViewModel @Inject constructor(
         }
     }
 
+    /** The search itself runs once per submit: the liked lookup hangs off this flow instead of re-collecting [searched]. */
+    @OptIn(ExperimentalCoroutinesApi::class)
     val state: StateFlow<SearchUiState> = combine(query, suggestions, history.recent(HISTORY_LIMIT), searched) { q, sugg, recent, searchMode ->
         SearchUiState(
             q,
@@ -80,6 +86,9 @@ class SearchViewModel @Inject constructor(
                 else -> SearchMode.Suggestions(sugg, recent)
             },
         )
+    }.flatMapLatest { s ->
+        val songs = (s.mode as? SearchMode.Results)?.results?.songs.orEmpty()
+        library.likedAmong(songs).map { s.copy(liked = it) }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), SearchUiState("", SearchMode.Idle(emptyList())))
 
     fun onQueryChange(q: String) { query.value = q; submitted.value = null }

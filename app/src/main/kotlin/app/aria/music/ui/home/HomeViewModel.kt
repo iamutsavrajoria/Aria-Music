@@ -11,6 +11,7 @@ import app.aria.domain.Track
 import app.aria.domain.TrackId
 import app.aria.music.player.PlayerController
 import app.aria.music.player.PlayerMessage
+import app.aria.music.ui.common.likedAmong
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -21,7 +22,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -89,7 +89,8 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    private val remoteSection: Flow<RemoteSection> = combine(home.remote(), fresh, phase, network.online) { cache, freshShelves, p, online ->
+    // An upstream throw must end as an empty or missing section, never as a crash of the shared state flow.
+    private val remoteSection: Flow<RemoteSection> = combine(home.remote().catch { emit(null) }, fresh, phase, network.online) { cache, freshShelves, p, online ->
         val shelves = freshShelves ?: cache?.shelves?.map { ShelfState.Ready(it) }
         when {
             shelves != null -> RemoteSection.Content(shelves, outdated = freshShelves == null && cache?.outdated == true, refreshFailed = p == Phase.Failed)
@@ -99,19 +100,17 @@ class HomeViewModel @Inject constructor(
         }
     }
 
-    @OptIn(ExperimentalCoroutinesApi::class)
-    private val liked: Flow<Set<TrackId>> = combine(home.quickPicks(LIMIT), home.recentlyPlayed(LIMIT)) { q, r -> (q + r).map { it.id }.toSet() }
-        .flatMapLatest { ids ->
-            if (ids.isEmpty()) flowOf(emptySet()) else combine(ids.map { id -> library.isLiked(id).catch { emit(false) }.map { id to it } }) { pairs ->
-                pairs.filter { it.second }.map { it.first }.toSet()
-            }
-        }
+    private data class Local(val quick: List<Track>, val recent: List<Track>, val liked: Set<TrackId>)
 
-    val state: StateFlow<HomeUiState> = combine(
-        combine(home.quickPicks(LIMIT), home.recentlyPlayed(LIMIT), liked) { q, r, l -> Triple(q, r, l) },
-        remoteSection, phase,
-    ) { (q, r, l), remote, p ->
-        HomeUiState(q, r, remote, refreshing = p == Phase.Running && remote is RemoteSection.Content, liked = l)
+    /** Quick picks and recently played are collected once; the liked set follows the songs that are visible. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private val local: Flow<Local> = combine(
+        home.quickPicks(LIMIT).catch { emit(emptyList()) },
+        home.recentlyPlayed(LIMIT).catch { emit(emptyList()) },
+    ) { q, r -> q to r }.flatMapLatest { (q, r) -> library.likedAmong(q + r).map { Local(q, r, it) } }
+
+    val state: StateFlow<HomeUiState> = combine(local, remoteSection, phase) { l, remote, p ->
+        HomeUiState(l.quick, l.recent, remote, refreshing = p == Phase.Running && remote is RemoteSection.Content, liked = l.liked)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), HomeUiState(emptyList(), emptyList(), RemoteSection.Loading, false))
 
     fun play(tracks: List<Track>, index: Int) = controller.play(tracks, index)
