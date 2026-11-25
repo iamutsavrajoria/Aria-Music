@@ -62,14 +62,18 @@ class LibraryViewModel @Inject constructor(
 
     private data class Filter(val query: String, val sort: LibrarySort)
 
+    /** Which load a [LibraryContent] belongs to: the tab, and the retry count that reloads the same tab. */
+    private data class Load(val tab: LibraryTab, val attempt: Int)
+    private data class Tagged(val load: Load, val content: LibraryContent)
+
     // Loading shows only when the tab (or a retry) changes; typing and sorting swap the rows in place, without flashing the spinner.
     @OptIn(ExperimentalCoroutinesApi::class)
-    private val content: Flow<LibraryContent> = combine(tab, reload) { t, _ -> t }.flatMapLatest { t ->
+    private val content: Flow<Tagged> = combine(tab, reload) { t, r -> Load(t, r) }.flatMapLatest { load ->
         combine(query, sort) { q, s -> Filter(q, s) }.flatMapLatest { f ->
-            rows(t, f)
-                .map { c -> if (c.isEmpty()) (if (f.query.isBlank()) LibraryContent.Empty else LibraryContent.NoMatches) else c }
+            rows(load.tab, f)
+                .map { c -> if (c.isEmpty()) (if (f.query.isEmpty()) LibraryContent.Empty else LibraryContent.NoMatches) else c }
                 .catch { emit(LibraryContent.Error) }
-        }.onStart { emit(LibraryContent.Loading) }
+        }.onStart { emit(LibraryContent.Loading) }.map { Tagged(load, it) }
     }
 
     private fun rows(t: LibraryTab, f: Filter): Flow<LibraryContent> = when (t) {
@@ -79,12 +83,15 @@ class LibraryViewModel @Inject constructor(
         LibraryTab.PLAYLISTS -> playlists.playlists(f.query, f.sort).map { LibraryContent.Playlists(it) }
     }
 
-    val state: StateFlow<LibraryUiState> = combine(tab, query, sort, content) { t, q, s, c -> LibraryUiState(t, q, s, c) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState(LibraryTab.SONGS, "", LibrarySort.RECENTLY_ADDED, LibraryContent.Loading))
+    // Content from a previous tab (or attempt) never pairs with the new tab: until the new load reports, the state says Loading.
+    val state: StateFlow<LibraryUiState> = combine(tab, reload, query, sort, content) { t, r, q, s, tagged ->
+        LibraryUiState(t, q, s, if (tagged.load == Load(t, r)) tagged.content else LibraryContent.Loading)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), LibraryUiState(LibraryTab.SONGS, "", LibrarySort.RECENTLY_ADDED, LibraryContent.Loading))
 
     /** Selecting the tab that is already open reloads it, which is how the error state retries. */
     fun setTab(t: LibraryTab) { if (tab.value == t) reload.value++ else tab.value = t }
-    fun setQuery(q: String) { query.value = q }
+    /** The filter is trimmed: a blank or padded filter must not reach SQL or turn a non-empty tab into Empty/NoMatches. */
+    fun setQuery(q: String) { query.value = q.trim() }
     fun setSort(s: LibrarySort) { sort.value = s }
 
     /** [PlayerController.play] windows the list to the queue cap and tells the user when it did. */

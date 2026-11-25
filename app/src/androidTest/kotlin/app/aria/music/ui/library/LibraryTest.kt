@@ -78,4 +78,15 @@ class LibraryTest {
     }
 
     @Test fun survivesPseudolocaleAndBigFonts() { show(state(songs(3)), pseudo = true, fontScale = 2f); rule.onNodeWithTag("library:tab:SONGS").assertIsDisplayed() }
+
+    @Test fun theFilterFieldHasARealLabel() {
+        show(state(songs(2)))
+        rule.onNodeWithText(str(R.string.library_filter_label)).assertExists()
+    }
+
+    @Test fun playAndShuffleNameWhatTheyPlayForTalkBack() {
+        show(state(songs(2)))
+        rule.onNodeWithContentDescription(str(R.string.library_play_all_desc)).performClick(); rule.onNodeWithContentDescription(str(R.string.library_shuffle_all_desc)).performClick()
+        assertEquals(listOf("playAll", "shuffleAll"), log)
+    }
 }

@@ -33,6 +33,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -143,7 +145,7 @@ private fun FilterField(query: String, onQuery: (String) -> Unit) {
         value = text, onValueChange = { text = it },
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag(TAG_LIBRARY_QUERY),
         singleLine = true,
-        placeholder = { Text(stringResource(R.string.library_filter_hint)) },
+        label = { Text(stringResource(R.string.library_filter_label)) },
         trailingIcon = if (text.isEmpty()) null else {
             { IconButton({ text = "" }, Modifier.size(48.dp)) { Icon(AriaIcons.Close, stringResource(R.string.library_filter_clear)) } }
         },
@@ -156,8 +158,11 @@ private fun SongList(rows: List<LibrarySong>, actions: LibraryActions) {
     LazyColumn(Modifier.fillMaxSize().testTag(TAG_LIBRARY_LIST)) {
         item(key = "play-shuffle") {
             Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Button(actions.onPlayAll, Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.library_play_all)) }
-                OutlinedButton(actions.onShuffleAll, Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.library_shuffle_all)) }
+                // The visible word stays short; the spoken name says what is played.
+                val playDescription = stringResource(R.string.library_play_all_desc)
+                val shuffleDescription = stringResource(R.string.library_shuffle_all_desc)
+                Button(actions.onPlayAll, Modifier.heightIn(min = 48.dp).semantics { contentDescription = playDescription }) { Text(stringResource(R.string.library_play_all)) }
+                OutlinedButton(actions.onShuffleAll, Modifier.heightIn(min = 48.dp).semantics { contentDescription = shuffleDescription }) { Text(stringResource(R.string.library_shuffle_all)) }
             }
         }
         itemsIndexed(rows, key = { _, r -> "song:" + r.track.id.raw }) { i, r ->

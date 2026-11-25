@@ -10,9 +10,11 @@
     <string name="library_tab_playlists">Playlists</string>
     <string name="library_play_all">Play</string>
     <string name="library_shuffle_all">Shuffle</string>
+    <string name="library_play_all_desc">Play all songs</string>
+    <string name="library_shuffle_all_desc">Shuffle all songs</string>
     <string name="library_sort_recent">Recently added</string>
     <string name="library_sort_title">A to Z</string>
-    <string name="library_filter_hint">Filter this list</string>
+    <string name="library_filter_label">Filter this list</string>
     <string name="library_filter_clear">Clear filter</string>
     <string name="library_empty_songs">Like or add songs to see them here</string>
     <string name="library_empty_albums">Save albums to see them here</string>

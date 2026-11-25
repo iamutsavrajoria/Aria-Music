@@ -6,7 +6,9 @@ import app.aria.domain.testing.*
 import app.aria.music.player.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.*
@@ -119,5 +121,43 @@ class LibraryViewModelTest {
         val flaky = object : LibraryRepository by base { override fun songs(query: String, sort: LibrarySort) = if (fail) flow<List<LibrarySong>> { error("db") } else base.songs(query, sort) }
         val e = Env(backgroundScope, flaky); fail = false; e.vm.setQuery("Song")
         assertEquals(1, songs(e).size)
+    }
+
+    @Test fun aWhitespaceOnlyFilterIsNoFilter() = runTest(dispatcher) {
+        val e = Env(backgroundScope); e.fake.setInLibrary(Samples.track(1), true)
+        e.vm.setQuery("   ")
+        assertEquals("", e.vm.state.value.query); assertEquals(1, songs(e).size)
+    }
+
+    @Test fun aWhitespaceOnlyFilterOnAnEmptyTabIsEmptyNotNoMatches() = runTest(dispatcher) {
+        val e = Env(backgroundScope); e.vm.setQuery(" \t ")
+        assertEquals(LibraryContent.Empty, e.vm.state.value.content)
+    }
+
+    @Test fun theFilterIsTrimmedBeforeItReachesTheRepository() = runTest(dispatcher) {
+        val e = Env(backgroundScope); e.fake.setInLibrary(Samples.track(1, "Banana"), true); e.fake.setInLibrary(Samples.track(2, "Cherry"), true)
+        e.vm.setQuery("  ban "); assertEquals("ban", e.vm.state.value.query); assertEquals(listOf("Banana"), songs(e).map { it.track.title })
+    }
+
+    @Test fun changingTheTabNeverShowsTheOldTabsRowsUnderTheNewTab() = runTest(dispatcher) {
+        val e = Env(backgroundScope); e.fake.setInLibrary(Samples.track(1), true); e.fake.setAlbumSaved(Samples.album(1), true)
+        val seen = mutableListOf<LibraryUiState>()
+        backgroundScope.launch { e.vm.state.collect { seen += it } }
+        e.vm.setTab(LibraryTab.ALBUMS)
+        assertTrue(seen.none { it.tab == LibraryTab.ALBUMS && it.content is LibraryContent.Songs }, "stale frame: $seen")
+        assertTrue(seen.none { it.tab == LibraryTab.SONGS && it.content is LibraryContent.Albums }, "stale frame: $seen")
+        assertEquals(listOf(Samples.album(1)), (e.vm.state.value.content as LibraryContent.Albums).rows)
+    }
+
+    @Test fun aFailedTabShowsLoadingAtOnceWhenRetried() = runTest(dispatcher) {
+        val failing = object : LibraryRepository by FakeLibraryRepository() {
+            var fail = true
+            override fun songs(query: String, sort: LibrarySort): Flow<List<LibrarySong>> = if (fail) flow { throw java.io.IOException() } else flowOf(emptyList())
+        }
+        val e = Env(backgroundScope, failing)
+        assertEquals(LibraryContent.Error, e.vm.state.value.content)
+        val seen = mutableListOf<LibraryContent>(); backgroundScope.launch { e.vm.state.collect { seen += it.content } }
+        failing.fail = false; e.vm.setTab(LibraryTab.SONGS)
+        assertEquals(listOf(LibraryContent.Error, LibraryContent.Loading, LibraryContent.Empty), seen)
     }
 }

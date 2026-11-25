@@ -116,4 +116,10 @@ class HomeTest {
         rule.runOnIdle { refresh.action() }
         assertEquals(listOf("refresh"), log)
     }
+
+    @Test fun refreshIsAlsoAFocusableButtonInTheHeader() {
+        show(state(content(ShelfState.Ready(shelf))))
+        rule.onNodeWithContentDescription(str(R.string.home_refresh)).assertWidthIsAtLeast(48.dp).assertHeightIsAtLeast(48.dp).assertHasClickAction().performClick()
+        assertEquals(listOf("refresh"), log)
+    }
 }
