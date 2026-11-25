@@ -56,7 +56,7 @@ class LibraryTest {
     }
 
     @Test fun sortChipFeedsTheAction() { show(state(songs(2))); rule.onNodeWithText(str(R.string.library_sort_title)).performClick(); assertEquals(listOf("sort:TITLE"), log) }
-    @Test fun typingFeedsTheQueryAfterTheDebounce() { show(state(songs(2))); rule.onNodeWithTag(TAG_LIBRARY_QUERY).performTextInput("ab"); rule.waitForIdle(); assertEquals(listOf("query:ab"), log) }
+    @Test fun typingFeedsTheQueryAfterTheDebounce() { show(state(songs(2))); rule.onNodeWithTag(TAG_LIBRARY_QUERY).performTextInput("ab"); rule.mainClock.advanceTimeBy(500); rule.waitForIdle(); assertEquals(listOf("query:ab"), log) }
 
     @Test fun aLargeListScrollsToTheEnd() {
         show(state(songs(1_500))); rule.onNodeWithTag(TAG_LIBRARY_LIST).performScrollToKey("song:track001500"); rule.onNodeWithText("Song 1500").assertIsDisplayed()
