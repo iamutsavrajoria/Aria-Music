@@ -26,87 +26,87 @@ class LibraryViewModelTest {
 
     private fun songs(e: Env) = (e.vm.state.value.content as LibraryContent.Songs).rows
 
-    @Test fun emptyThenSongsThenNoMatches() = runTest {
+    @Test fun emptyThenSongsThenNoMatches() = runTest(dispatcher) {
         val e = Env(backgroundScope); assertEquals(LibraryContent.Empty, e.vm.state.value.content)
         e.fake.setInLibrary(Samples.track(1), true); e.fake.setInLibrary(Samples.track(2, "Zebra"), true)
         assertEquals(2, songs(e).size)
         e.vm.setQuery("nothing-like-this"); assertEquals(LibraryContent.NoMatches, e.vm.state.value.content)
     }
 
-    @Test fun anEmptyTabWithNoFilterIsEmptyNotNoMatches() = runTest {
+    @Test fun anEmptyTabWithNoFilterIsEmptyNotNoMatches() = runTest(dispatcher) {
         val e = Env(backgroundScope); e.vm.setTab(LibraryTab.ALBUMS)
         assertEquals(LibraryContent.Empty, e.vm.state.value.content)
     }
 
-    @Test fun sortAndFilterAreAppliedByTheRepository() = runTest {
+    @Test fun sortAndFilterAreAppliedByTheRepository() = runTest(dispatcher) {
         val e = Env(backgroundScope); e.fake.setInLibrary(Samples.track(1, "Banana"), true); e.fake.setInLibrary(Samples.track(2, "apple"), true)
         e.vm.setSort(LibrarySort.TITLE)
         assertEquals(listOf("apple", "Banana"), songs(e).map { it.track.title })
         e.vm.setQuery("ban"); assertEquals(listOf("Banana"), songs(e).map { it.track.title })
     }
 
-    @Test fun onlyLibrarySongsAreListedAndLikedIsCarried() = runTest {
+    @Test fun onlyLibrarySongsAreListedAndLikedIsCarried() = runTest(dispatcher) {
         val e = Env(backgroundScope); e.fake.setLiked(Samples.track(1), true); e.fake.setInLibrary(Samples.track(2), true)
         assertEquals(mapOf(Samples.track(1).id to true, Samples.track(2).id to false), songs(e).associate { it.track.id to it.liked })
     }
 
-    @Test fun tabsSwitchContent() = runTest {
+    @Test fun tabsSwitchContent() = runTest(dispatcher) {
         val e = Env(backgroundScope); e.fake.setAlbumSaved(Samples.album(1), true); e.fake.setArtistFollowed(Samples.artist(1), true); e.playlists.create("Mix")
         e.vm.setTab(LibraryTab.ALBUMS); assertEquals(listOf(Samples.album(1)), (e.vm.state.value.content as LibraryContent.Albums).rows)
         e.vm.setTab(LibraryTab.ARTISTS); assertEquals(listOf(Samples.artist(1)), (e.vm.state.value.content as LibraryContent.Artists).rows)
         e.vm.setTab(LibraryTab.PLAYLISTS); assertEquals(listOf("Mix"), (e.vm.state.value.content as LibraryContent.Playlists).rows.map { it.title })
     }
 
-    @Test fun playingFromARowQueuesTheVisibleListFromThere() = runTest {
+    @Test fun playingFromARowQueuesTheVisibleListFromThere() = runTest(dispatcher) {
         val e = Env(backgroundScope); Samples.tracks(3).forEach { e.fake.setInLibrary(it, true) }
         val shown = songs(e).map { it.track }
         e.vm.play(shown, 1)
         assertEquals(listOf(shown to 1), e.engine.playNowCalls)
     }
 
-    @Test fun listsLongerThanTheCapQueueAWindowAndTellTheUser() = runTest {
+    @Test fun listsLongerThanTheCapQueueAWindowAndTellTheUser() = runTest(dispatcher) {
         val e = Env(backgroundScope); val many = Samples.tracks(700)
         e.vm.play(many, 650)
         assertEquals(50, e.engine.playNowCalls.single().first.size); assertEquals(listOf<PlayerMessage>(PlayerMessage.QueueWindowed(50, 700)), e.messages)
     }
 
-    @Test fun playAllAndShuffleAllUseTheWholeFilteredList() = runTest {
+    @Test fun playAllAndShuffleAllUseTheWholeFilteredList() = runTest(dispatcher) {
         val e = Env(backgroundScope); Samples.tracks(5).forEach { e.fake.setInLibrary(it, true) }
         e.vm.playAll(); e.vm.shuffleAll()
         assertEquals(5, e.engine.playNowCalls[0].first.size); assertEquals(5, e.engine.playNowCalls[1].first.size)
         assertEquals(e.engine.playNowCalls[0].first.toSet(), e.engine.playNowCalls[1].first.toSet())
     }
 
-    @Test fun playAllRespectsTheFilter() = runTest {
+    @Test fun playAllRespectsTheFilter() = runTest(dispatcher) {
         val e = Env(backgroundScope); e.fake.setInLibrary(Samples.track(1, "Banana"), true); e.fake.setInLibrary(Samples.track(2, "Cherry"), true)
         e.vm.setQuery("ban"); e.vm.playAll()
         assertEquals(listOf("Banana"), e.engine.playNowCalls.single().first.map { it.title })
     }
 
-    @Test fun playAllOnAnEmptyListDoesNothing() = runTest {
+    @Test fun playAllOnAnEmptyListDoesNothing() = runTest(dispatcher) {
         val e = Env(backgroundScope); e.vm.playAll(); e.vm.shuffleAll(); assertTrue(e.engine.playNowCalls.isEmpty())
     }
 
-    @Test fun songActionsWriteTheLibraryOrQueue() = runTest {
+    @Test fun songActionsWriteTheLibraryOrQueue() = runTest(dispatcher) {
         val e = Env(backgroundScope); val t = Samples.track(1); e.fake.setLiked(t, true)
         e.vm.trackAction(t, LibraryTrackAction.UNLIKE); assertFalse(e.fake.isLiked(t.id).first()); assertTrue(e.fake.isInLibrary(t.id).first())
         e.vm.trackAction(t, LibraryTrackAction.REMOVE_FROM_LIBRARY); assertFalse(e.fake.isInLibrary(t.id).first())
         e.vm.trackAction(t, LibraryTrackAction.PLAY_NEXT); assertTrue("playNext" in e.engine.calls)
     }
 
-    @Test fun aFailingWriteIsReportedNotThrown() = runTest {
+    @Test fun aFailingWriteIsReportedNotThrown() = runTest(dispatcher) {
         val broken = object : LibraryRepository by FakeLibraryRepository() { override suspend fun setInLibrary(track: Track, inLibrary: Boolean) = error("db") }
         val e = Env(backgroundScope, broken)
         e.vm.trackAction(Samples.track(1), LibraryTrackAction.REMOVE_FROM_LIBRARY)
         assertEquals(listOf<PlayerMessage>(PlayerMessage.LikeFailed), e.messages)
     }
 
-    @Test fun repositoryFailureShowsTheErrorState() = runTest {
+    @Test fun repositoryFailureShowsTheErrorState() = runTest(dispatcher) {
         val broken = object : LibraryRepository by FakeLibraryRepository() { override fun songs(query: String, sort: LibrarySort) = flow<List<LibrarySong>> { error("db") } }
         assertEquals(LibraryContent.Error, Env(backgroundScope, broken).vm.state.value.content)
     }
 
-    @Test fun selectingTheOpenTabAgainRetriesAfterAnError() = runTest {
+    @Test fun selectingTheOpenTabAgainRetriesAfterAnError() = runTest(dispatcher) {
         var fail = true; val base = FakeLibraryRepository(); base.setInLibrary(Samples.track(1), true)
         val flaky = object : LibraryRepository by base { override fun songs(query: String, sort: LibrarySort) = if (fail) flow<List<LibrarySong>> { error("db") } else base.songs(query, sort) }
         val e = Env(backgroundScope, flaky); assertEquals(LibraryContent.Error, e.vm.state.value.content)
@@ -114,7 +114,7 @@ class LibraryViewModelTest {
         assertEquals(1, songs(e).size)
     }
 
-    @Test fun anErrorClearsWhenTheFilterChanges() = runTest {
+    @Test fun anErrorClearsWhenTheFilterChanges() = runTest(dispatcher) {
         var fail = true; val base = FakeLibraryRepository(); base.setInLibrary(Samples.track(1), true)
         val flaky = object : LibraryRepository by base { override fun songs(query: String, sort: LibrarySort) = if (fail) flow<List<LibrarySong>> { error("db") } else base.songs(query, sort) }
         val e = Env(backgroundScope, flaky); fail = false; e.vm.setQuery("Song")
