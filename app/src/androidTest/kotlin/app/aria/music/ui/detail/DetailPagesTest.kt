@@ -50,8 +50,12 @@ class DetailPagesTest {
     }
 
     @Test fun saveToggleDescriptionFlips() {
-        showAlbum(AlbumUiState.Content(albumDetail, saved = true)); rule.onNodeWithContentDescription(str(R.string.detail_unsave)).assertExists()
-        showAlbum(AlbumUiState.Content(albumDetail, saved = false)); rule.onNodeWithContentDescription(str(R.string.detail_save)).assertExists()
+        // One setContent per test: the saved flag is state, flipped after the first assertion.
+        val saved = androidx.compose.runtime.mutableStateOf(true)
+        log.clear(); rule.setContent { AriaTestTheme { AlbumContent(AlbumUiState.Content(albumDetail, saved = saved.value), album) } }
+        rule.onNodeWithContentDescription(str(R.string.detail_unsave)).assertExists()
+        rule.runOnIdle { saved.value = false }
+        rule.onNodeWithContentDescription(str(R.string.detail_save)).assertExists()
     }
 
     @Test fun likedTracksOfferUnlike() {
@@ -76,7 +80,8 @@ class DetailPagesTest {
         scrollTo(hasText("About text")); rule.onNodeWithText("About text").assertExists()
         scrollTo(hasTestTag(TAG_DETAIL_PLAY)); rule.onNodeWithTag(TAG_DETAIL_PLAY).performClick(); rule.onNodeWithTag(TAG_DETAIL_SHUFFLE).performClick(); rule.onNodeWithTag(TAG_DETAIL_SAVE).performClick()
         scrollTo(hasText("Song 2")); rule.onNodeWithText("Song 2").performClick()
-        scrollTo(hasText("Album 1")); rule.onNodeWithText("Album 1").performClick()
+        // Scroll to the shelf row itself (like HomeTest) so the tile is on screen, not merely composed by prefetch.
+        scrollTo(hasTestTag("artist:shelf:1")); rule.onNodeWithText("Album 1").performClick()
         assertEquals(listOf("playTop", "shuffleTop", "follow", "songs:2:1", "album:MPREb_1"), log)
     }
 
