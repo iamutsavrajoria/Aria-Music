@@ -33,7 +33,11 @@ class PlaylistsTest {
     }
     @Test fun renameDialogRejectsBlankAndConfirmsTrimmedInput() {
         show(content()); rule.onNodeWithTag(TAG_PLAYLIST_RENAME).performClick()
-        rule.onNodeWithText(str(R.string.playlist_name_confirm)).assertIsNotEnabled()
+        // The dialog starts with the current name; clearing it (or typing only spaces) leaves nothing to save.
+        rule.onNodeWithTag("name:field").assertTextContains("Mine"); rule.onNodeWithText(str(R.string.playlist_name_confirm)).assertIsEnabled()
+        rule.onNodeWithTag("name:field").performTextClearance(); rule.onNodeWithText(str(R.string.playlist_name_confirm)).assertIsNotEnabled()
+        rule.onNodeWithTag("name:field").performTextInput("   "); rule.onNodeWithText(str(R.string.playlist_name_confirm)).assertIsNotEnabled()
+        rule.onNodeWithTag("name:field").performTextClearance()
         rule.onNodeWithTag("name:field").performTextInput("Road trip"); rule.onNodeWithText(str(R.string.playlist_name_confirm)).performClick()
         assertEquals(listOf("rename:Road trip"), log)
     }
