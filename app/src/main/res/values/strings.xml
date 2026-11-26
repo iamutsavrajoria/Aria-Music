@@ -35,6 +35,7 @@
     <string name="msg_skipped_other">Skipped %1$s: could not play</string>
     <string name="msg_too_many_failures">Stopped after several tracks failed in a row</string>
     <string name="msg_like_failed">Could not update your library</string>
+    <string name="msg_playlist_failed">Could not update your playlist</string>
     <string name="msg_history_failed">Could not update your search history</string>
     <string name="msg_refresh_failed">Could not refresh. Showing saved content.</string>
     <string name="msg_queue_windowed">Queued %1$s of %2$s songs, starting from the one you tapped</string>
@@ -96,6 +97,18 @@
     <string name="track_like">Like</string>
     <string name="track_unlike">Remove like</string>
     <string name="track_liked">Liked</string>
+    <string name="settings_title">Settings</string>
+    <string name="settings_playback">Playback</string>
+    <string name="settings_history_title">Count a play after</string>
+    <string name="settings_radio">Endless radio</string>
+    <string name="settings_radio_body">Add related songs when the queue runs low</string>
+    <string name="settings_silence">Skip silence</string>
+    <string name="settings_loudness">Normalize loudness</string>
+    <string name="settings_sleep_default">Default sleep timer</string>
+    <string name="settings_about">About</string>
+    <string name="settings_version">Version %1$s</string>
+    <string name="settings_about_non_affiliation">%1$s is an independent project. It is not affiliated with, endorsed by, or sponsored by Google, YouTube or YouTube Music.</string>
+    <string name="settings_about_no_analytics">No analytics. Nothing is sent to the Aria project.</string>
     <string name="coming_soon">Coming soon</string>
     <string name="home_quick_picks">Quick picks</string>
     <string name="home_recently_played">Recently played</string>
@@ -138,7 +151,6 @@
     <string name="playlist_empty_hint">No songs yet. Use Add to playlist in a song menu.</string>
     <string name="track_add_to_playlist">Add to playlist</string>
     <string name="playlist_pick_title">Add to playlist</string>
-    <string name="playlist_pick_empty">You have no playlists yet</string>
     <string name="playlist_added_to">Added to %1$s</string>
     <string name="playlist_add_failed">Could not add the song</string>
     <string name="playlist_done">Done</string>

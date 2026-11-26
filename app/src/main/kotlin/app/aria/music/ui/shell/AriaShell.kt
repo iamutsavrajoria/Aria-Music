@@ -37,6 +37,7 @@ import app.aria.music.ui.nowplaying.NowPlayingScreen
 import app.aria.music.ui.queue.QueueScreen
 import app.aria.music.ui.home.HomeScreen
 import app.aria.music.ui.search.SearchScreen
+import app.aria.music.ui.settings.SettingsScreen
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
@@ -113,6 +114,7 @@ fun AriaRoot(
         { album, artist, playlist -> SearchScreen(album, artist, playlist) },
     home: @Composable (onAlbum: (String) -> Unit, onArtist: (String) -> Unit, onPlaylist: (String) -> Unit, onSettings: () -> Unit) -> Unit =
         { album, artist, playlist, settings -> HomeScreen(album, artist, playlist, settings) },
+    settings: @Composable (onBack: () -> Unit) -> Unit = { back -> SettingsScreen(back) },
 ) {
     val nav = rememberNavController()
     val snackbar = remember { SnackbarHostState() }
@@ -130,5 +132,5 @@ fun AriaRoot(
         snackbarHost = snackbar,
         miniPlayer = { miniPlayer { nav.navigate(NowPlayingRoute) { launchSingleTop = true } } },
         miniPlayerVisible = !fullScreen,
-    ) { padding -> AriaNavHost(nav, Modifier.padding(padding), nowPlaying, queue, search, home) }
+    ) { padding -> AriaNavHost(nav, Modifier.padding(padding), nowPlaying, queue, search, home, settings) }
 }

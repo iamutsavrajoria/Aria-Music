@@ -8,7 +8,9 @@ import app.aria.music.player.*
 import app.aria.music.ui.common.TrackMenuAction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.*
 import org.junit.After
@@ -100,6 +102,22 @@ class AlbumViewModelTest {
         val e = Env(backgroundScope); e.library.setAlbumSaved(Samples.album(1), true)
         e.vm.toggleSaved()
         assertFalse((e.vm.state.value as AlbumUiState.Content).saved); assertEquals(emptyList(), e.library.albums("", LibrarySort.TITLE).first())
+    }
+
+    // The screen's copy of the flag is frozen at what it first saw; the stored value moves on without it (another screen wrote it).
+    @Test fun toggleSavedUsesTheStoredValueEvenWhenTheScreenCopyLags() = runTest(dispatcher) {
+        val base = FakeLibraryRepository(); val writes = mutableListOf<Boolean>()
+        val lagging = object : LibraryRepository by base {
+            override fun isAlbumSaved(id: String) = flow { emit(base.isAlbumSaved(id).first()); awaitCancellation() }
+            override suspend fun setAlbumSaved(album: AlbumRef, saved: Boolean) { writes += saved; base.setAlbumSaved(album, saved) }
+        }
+        val e = Env(backgroundScope, library = lagging)
+        assertFalse((e.vm.state.value as AlbumUiState.Content).saved)
+        base.setAlbumSaved(Samples.album(1), true); writes.clear()
+        assertFalse((e.vm.state.value as AlbumUiState.Content).saved)    // still the stale copy
+        e.vm.toggleSaved()
+        assertEquals(listOf(false), writes)                              // the old `!screenCopy` code would write true
+        assertTrue(base.albums("", LibrarySort.TITLE).first().isEmpty())
     }
 
     @Test fun backToBackTogglesAlternate() = runTest(dispatcher) {

@@ -118,11 +118,16 @@ class RootTest {
                     controller = controller,
                     miniPlayer = { Text("MINI") },
                     home = { _, _, _, onSettings -> Text("HOME", Modifier.clickable(onClick = onSettings)) },
+                    settings = { onBack -> Text("SETTINGS", Modifier.clickable(onClick = onBack)) },
                 )
             }
         }
+        rule.onNodeWithText("MINI").assertIsDisplayed()
         rule.onNodeWithText("HOME").performClick()
-        rule.onNodeWithText(target.getString(R.string.coming_soon)).assertIsDisplayed()
+        rule.onNodeWithText("SETTINGS").assertIsDisplayed()
         rule.onNodeWithText("MINI").assertDoesNotExist()
+        rule.onNodeWithText("SETTINGS").performClick()        // back
+        rule.onNodeWithText("HOME").assertIsDisplayed()
+        rule.onNodeWithText("MINI").assertIsDisplayed()
     }
 }

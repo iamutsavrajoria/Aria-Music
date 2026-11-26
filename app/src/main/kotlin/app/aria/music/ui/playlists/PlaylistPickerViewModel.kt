@@ -13,6 +13,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.sync.Mutex
 
 /** Behind the "Add to playlist" dialog. Adding upserts the song but does not put it in the library (ADR-0003). */
 @HiltViewModel
@@ -21,10 +22,37 @@ class PlaylistPickerViewModel @Inject constructor(private val repo: PlaylistRepo
         .catch { emit(emptyList()) }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    suspend fun addTo(playlistId: String, track: Track) = repo.addTracks(playlistId, listOf(track))
+    sealed interface Outcome {
+        data class Added(val playlistId: String) : Outcome
+        /** Another add is still running: this tap did nothing. */
+        data object Busy : Outcome
+        /** The name had no visible character: nothing was created. */
+        data object BlankName : Outcome
+    }
 
-    /** Null when the name is blank (nothing is created). */
-    suspend fun create(name: String): String? = PlaylistNames.clean(name)?.let { repo.create(it) }
+    /** One add at a time: a second tap while one is running is ignored, so a slow write cannot add the song twice. */
+    private val busy = Mutex()
 
-    suspend fun createAndAdd(name: String, track: Track): String? = create(name)?.also { repo.addTracks(it, listOf(track)) }
+    /** A playlist created for a song whose add failed: a retry with the same name reuses it instead of creating a duplicate. */
+    private var created: Pair<String, String>? = null
+
+    /** Failures throw (and leave nothing half-done that a retry would repeat). */
+    suspend fun addTo(playlistId: String, track: Track): Outcome = exclusive {
+        repo.addTracks(playlistId, listOf(track)); Outcome.Added(playlistId)
+    }
+
+    suspend fun createAndAdd(name: String, track: Track): Outcome {
+        val clean = PlaylistNames.clean(name) ?: return Outcome.BlankName
+        return exclusive {
+            val id = created?.takeIf { it.first == clean }?.second ?: repo.create(clean).also { created = clean to it }
+            repo.addTracks(id, listOf(track))
+            created = null
+            Outcome.Added(id)
+        }
+    }
+
+    private suspend fun exclusive(block: suspend () -> Outcome): Outcome {
+        if (!busy.tryLock()) return Outcome.Busy
+        try { return block() } finally { busy.unlock() }
+    }
 }

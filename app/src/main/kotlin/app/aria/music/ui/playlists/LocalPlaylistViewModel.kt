@@ -55,7 +55,7 @@ class LocalPlaylistViewModel @Inject constructor(
 
     private fun write(block: suspend () -> Unit) {
         viewModelScope.launch {
-            try { edits.withLock { block() } } catch (e: CancellationException) { throw e } catch (e: Exception) { controller.notify(PlayerMessage.LikeFailed) }
+            try { edits.withLock { block() } } catch (e: CancellationException) { throw e } catch (e: Exception) { controller.notify(PlayerMessage.PlaylistFailed) }
         }
     }
 

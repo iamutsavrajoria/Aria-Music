@@ -103,6 +103,24 @@ class LibraryViewModelTest {
         assertEquals(listOf<PlayerMessage>(PlayerMessage.LikeFailed), e.messages)
     }
 
+    @Test fun createPlaylistTrimsTheNameAndIgnoresBlankOnes() = runTest(dispatcher) {
+        val e = Env(backgroundScope)
+        e.vm.createPlaylist("   "); e.vm.createPlaylist("")
+        assertTrue(e.playlists.playlists("", LibrarySort.TITLE).first().isEmpty())
+        e.vm.createPlaylist("  Road trip  ")
+        assertEquals(listOf("Road trip"), e.playlists.playlists("", LibrarySort.TITLE).first().map { it.title }); assertTrue(e.messages.isEmpty())
+    }
+
+    @Test fun aFailingCreatePlaylistIsReportedAsAPlaylistFailure() = runTest(dispatcher) {
+        val base = FakePlaylistRepository()
+        val broken = object : PlaylistRepository by base { override suspend fun create(name: String): String = error("db") }
+        val messages = mutableListOf<PlayerMessage>()
+        val controller = PlayerController(FakePlaybackEngine(), ServiceLauncher { }, backgroundScope)
+        backgroundScope.launch { controller.messages.collect { messages += it } }
+        LibraryViewModel(FakeLibraryRepository(), broken, controller).createPlaylist("Mix")
+        assertEquals(listOf<PlayerMessage>(PlayerMessage.PlaylistFailed), messages)
+    }
+
     @Test fun repositoryFailureShowsTheErrorState() = runTest(dispatcher) {
         val broken = object : LibraryRepository by FakeLibraryRepository() { override fun songs(query: String, sort: LibrarySort) = flow<List<LibrarySong>> { error("db") } }
         assertEquals(LibraryContent.Error, Env(backgroundScope, broken).vm.state.value.content)

@@ -44,6 +44,10 @@ class PlayerMessageTextTest {
         assertEquals("Could not update your library", PlayerMessage.LikeFailed.text(r))
     }
 
+    @Test fun playlistFailureIsNonTechnical() {
+        assertEquals("Could not update your playlist", PlayerMessage.PlaylistFailed.text(r))
+    }
+
     @Test fun historyFailureIsNonTechnical() {
         assertEquals("Could not update your search history", PlayerMessage.HistoryFailed.text(r))
     }

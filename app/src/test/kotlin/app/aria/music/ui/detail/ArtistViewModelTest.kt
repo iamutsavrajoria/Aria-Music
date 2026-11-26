@@ -8,7 +8,9 @@ import app.aria.music.player.*
 import app.aria.music.ui.common.TrackMenuAction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.*
 import org.junit.After
@@ -25,8 +27,8 @@ class ArtistViewModelTest {
     @Before fun setMain() = Dispatchers.setMain(dispatcher)
     @After fun resetMain() = Dispatchers.resetMain()
 
-    private class Env(scope: kotlinx.coroutines.CoroutineScope, online: Boolean = true) {
-        val browse = FakeBrowseSource(); val library = FakeLibraryRepository(); val engine = FakePlaybackEngine(); val network = FakeNetworkMonitor(online)
+    private class Env(scope: kotlinx.coroutines.CoroutineScope, online: Boolean = true, val library: LibraryRepository = FakeLibraryRepository()) {
+        val browse = FakeBrowseSource(); val engine = FakePlaybackEngine(); val network = FakeNetworkMonitor(online)
         val songs = Shelf("Songs", null, Samples.tracks(2).map { BrowseItem.Song(it) })
         val detail = ArtistDetail(Samples.artist(1), "About", "1M", listOf(songs, Shelf("Albums", null, listOf(BrowseItem.Album(Samples.album(1))))))
         init { browse.artists["UC1"] = Result.success(detail) }
@@ -67,6 +69,21 @@ class ArtistViewModelTest {
         e.vm.trackAction(t, TrackMenuAction.LIKE); assertEquals(setOf(t.id), (e.vm.state.value as ArtistUiState.Content).liked)
         e.vm.trackAction(t, TrackMenuAction.UNLIKE); assertTrue((e.vm.state.value as ArtistUiState.Content).liked.isEmpty())
         e.vm.trackAction(t, TrackMenuAction.PLAY_NEXT); assertTrue("playNext" in e.engine.calls)
+    }
+
+    @Test fun toggleFollowedUsesTheStoredValueEvenWhenTheScreenCopyLags() = runTest(dispatcher) {
+        val base = FakeLibraryRepository(); val writes = mutableListOf<Boolean>()
+        val lagging = object : LibraryRepository by base {
+            override fun isArtistFollowed(id: String) = flow { emit(base.isArtistFollowed(id).first()); awaitCancellation() }
+            override suspend fun setArtistFollowed(artist: ArtistRef, followed: Boolean) { writes += followed; base.setArtistFollowed(artist, followed) }
+        }
+        val e = Env(backgroundScope, library = lagging)
+        assertFalse((e.vm.state.value as ArtistUiState.Content).followed)
+        base.setArtistFollowed(Samples.artist(1), true); writes.clear()
+        assertFalse((e.vm.state.value as ArtistUiState.Content).followed)  // still the stale copy
+        e.vm.toggleFollowed()
+        assertEquals(listOf(false), writes)                                // the old `!screenCopy` code would write true
+        assertTrue(base.artists("", LibrarySort.TITLE).first().isEmpty())
     }
 
     @Test fun toggleFollowedFlipsTheStoredValueNotTheScreensCopy() = runTest(dispatcher) {

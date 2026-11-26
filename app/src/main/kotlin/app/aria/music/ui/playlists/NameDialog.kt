@@ -26,14 +26,14 @@ const val TAG_NAME_FIELD = "name:field"
 /** Asks for a playlist name; Save stays disabled until the name has a visible character, and the confirmed name is already cleaned. */
 @Composable
 fun NameDialog(@StringRes title: Int, initial: String, onConfirm: (String) -> Unit, onDismiss: () -> Unit) {
-    var text by rememberSaveable { mutableStateOf(initial.take(PlaylistNames.MAX)) }
+    var text by rememberSaveable { mutableStateOf(PlaylistNames.limit(initial)) }
     val clean = PlaylistNames.clean(text)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(stringResource(title)) },
         text = {
             OutlinedTextField(
-                value = text, onValueChange = { text = it.take(PlaylistNames.MAX) },
+                value = text, onValueChange = { text = PlaylistNames.limit(it) },
                 modifier = Modifier.fillMaxWidth().testTag(TAG_NAME_FIELD),
                 singleLine = true,
                 label = { Text(stringResource(R.string.playlist_name_hint)) },

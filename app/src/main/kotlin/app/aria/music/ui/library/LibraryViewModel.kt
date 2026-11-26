@@ -104,7 +104,7 @@ class LibraryViewModel @Inject constructor(
     /** A blank name is ignored (the dialog does not offer it either); the new playlist appears through the Playlists flow. */
     fun createPlaylist(name: String) {
         val n = PlaylistNames.clean(name) ?: return
-        guardedWrite { playlists.create(n) }
+        guardedWrite(PlayerMessage.PlaylistFailed) { playlists.create(n) }
     }
 
     fun trackAction(t: Track, a: LibraryTrackAction) {
@@ -116,9 +116,9 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
-    private fun guardedWrite(block: suspend () -> Unit) {
+    private fun guardedWrite(failure: PlayerMessage = PlayerMessage.LikeFailed, block: suspend () -> Unit) {
         viewModelScope.launch {
-            try { block() } catch (e: CancellationException) { throw e } catch (e: Exception) { controller.notify(PlayerMessage.LikeFailed) }
+            try { block() } catch (e: CancellationException) { throw e } catch (e: Exception) { controller.notify(failure) }
         }
     }
 }

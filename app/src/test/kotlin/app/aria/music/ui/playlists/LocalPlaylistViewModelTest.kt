@@ -75,6 +75,24 @@ class LocalPlaylistViewModelTest {
         e.vm.remove(e.entry(3)); assertEquals(listOf("Song 1", "Song 2", "Song 3"), e.titles())
     }
 
+    @Test fun aFailingEditIsReportedAsAPlaylistFailureNotALibraryOne() = runTest(dispatcher) {
+        val base = FakePlaylistRepository()
+        val id = base.create("Mine"); base.addTracks(id, Samples.tracks(2))
+        val broken = object : PlaylistRepository by base {
+            override suspend fun rename(id: String, name: String) = error("db")
+            override suspend fun delete(id: String) = error("db")
+            override suspend fun removeEntry(playlistId: String, entryId: Int) = error("db")
+            override suspend fun reorder(playlistId: String, orderedEntryIds: List<Int>) = error("db")
+        }
+        val messages = mutableListOf<PlayerMessage>()
+        val controller = PlayerController(FakePlaybackEngine(), ServiceLauncher { }, backgroundScope)
+        backgroundScope.launch { controller.messages.collect { messages += it } }
+        val vm = LocalPlaylistViewModel(SavedStateHandle(mapOf("id" to id)), broken, controller); backgroundScope.launch { vm.state.collect { } }
+        val entry = (vm.state.value as LocalPlaylistUiState.Content).rows.first().entryId
+        vm.rename("New"); vm.delete(); vm.remove(entry); vm.moveDown(entry)
+        assertEquals(List<PlayerMessage>(4) { PlayerMessage.PlaylistFailed }, messages); assertFalse(vm.deleted.value)
+    }
+
     @Test fun anEmptyPlaylistDoesNotStartPlayback() = runTest(dispatcher) {
         val e = Env().init(backgroundScope)
         e.repo.tracks(e.id).first().forEach { e.vm.remove(it.entryId) }

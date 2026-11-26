@@ -3,7 +3,9 @@ package app.aria.music.ui.playlists
 
 import app.aria.domain.*
 import app.aria.domain.testing.*
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -28,7 +30,62 @@ class PlaylistPickerViewModelTest {
 
     @Test fun createAndAddRejectsBlankNames() = runTest(dispatcher) {
         val repo = FakePlaylistRepository(); val vm = PlaylistPickerViewModel(repo)
-        assertNull(vm.createAndAdd("  ", Samples.track(1))); val id = vm.createAndAdd(" New ", Samples.track(1))!!
+        assertEquals(PlaylistPickerViewModel.Outcome.BlankName, vm.createAndAdd("  ", Samples.track(1)))
+        assertTrue(repo.playlists("", LibrarySort.TITLE).first().isEmpty())
+        val id = (vm.createAndAdd(" New ", Samples.track(1)) as PlaylistPickerViewModel.Outcome.Added).playlistId
         assertEquals("New", repo.playlist(id).first()?.title); assertEquals(1, repo.tracks(id).first().size)
+    }
+
+    @Test fun aFailedAddKeepsTheCreatedPlaylistSoARetryDoesNotDuplicateIt() = runTest(dispatcher) {
+        val base = FakePlaylistRepository(); var failAdd = true
+        val repo = object : PlaylistRepository by base { override suspend fun addTracks(id: String, tracks: List<Track>) { if (failAdd) error("db"); base.addTracks(id, tracks) } }
+        val vm = PlaylistPickerViewModel(repo)
+        assertFailsWith<IllegalStateException> { vm.createAndAdd("Mix", Samples.track(1)) }
+        assertEquals(1, base.playlists("", LibrarySort.TITLE).first().size)
+        failAdd = false
+        val id = (vm.createAndAdd(" Mix ", Samples.track(1)) as PlaylistPickerViewModel.Outcome.Added).playlistId
+        assertEquals(listOf("Mix"), base.playlists("", LibrarySort.TITLE).first().map { it.title })
+        assertEquals(1, base.tracks(id).first().size)
+        // The created playlist is remembered only until its first song is in: the next "Mix" is a new playlist.
+        vm.createAndAdd("Mix", Samples.track(2)); assertEquals(2, base.playlists("", LibrarySort.TITLE).first().size)
+    }
+
+    @Test fun aTapWhileAnAddIsInFlightIsIgnored() = runTest(dispatcher) {
+        val base = FakePlaylistRepository(); val id = base.create("Mix"); val gate = CompletableDeferred<Unit>(); var adds = 0
+        val repo = object : PlaylistRepository by base { override suspend fun addTracks(id: String, tracks: List<Track>) { adds++; gate.await(); base.addTracks(id, tracks) } }
+        val vm = PlaylistPickerViewModel(repo)
+        val first = async { vm.addTo(id, Samples.track(1)) }
+        assertEquals(PlaylistPickerViewModel.Outcome.Busy, vm.addTo(id, Samples.track(1)))
+        assertEquals(PlaylistPickerViewModel.Outcome.Busy, vm.createAndAdd("Other", Samples.track(1)))
+        gate.complete(Unit)
+        assertEquals(PlaylistPickerViewModel.Outcome.Added(id), first.await())
+        assertEquals(1, adds); assertEquals(1, base.tracks(id).first().size); assertEquals(1, base.playlists("", LibrarySort.TITLE).first().size)
+        // The lock is released afterwards.
+        assertEquals(PlaylistPickerViewModel.Outcome.Added(id), vm.addTo(id, Samples.track(2)))
+    }
+
+    @Test fun theLockIsReleasedAfterAFailure() = runTest(dispatcher) {
+        val base = FakePlaylistRepository(); val id = base.create("Mix"); var fail = true
+        val repo = object : PlaylistRepository by base { override suspend fun addTracks(id: String, tracks: List<Track>) { if (fail) error("db"); base.addTracks(id, tracks) } }
+        val vm = PlaylistPickerViewModel(repo)
+        assertFailsWith<IllegalStateException> { vm.addTo(id, Samples.track(1)) }
+        fail = false; assertEquals(PlaylistPickerViewModel.Outcome.Added(id), vm.addTo(id, Samples.track(1)))
+    }
+}
+
+class PlaylistNamesTest {
+    @Test fun trimsAndRejectsBlank() { assertEquals("A", PlaylistNames.clean("  A ")); assertNull(PlaylistNames.clean("   ")) }
+
+    @Test fun truncatesByCodePointsNeverSplittingASurrogatePair() {
+        val grin = "\uD83D\uDE00"   // one code point, two UTF-16 units
+        val long = grin.repeat(150)
+        val cleaned = PlaylistNames.clean(long)!!
+        assertEquals(PlaylistNames.MAX, cleaned.codePointCount(0, cleaned.length))
+        assertEquals(grin.repeat(PlaylistNames.MAX), cleaned)
+        // A pair straddling the UTF-16 limit survives whole.
+        val straddle = "a".repeat(99) + grin + "tail"
+        assertEquals("a".repeat(99) + grin, PlaylistNames.clean(straddle))
+        assertEquals("x".repeat(100), PlaylistNames.clean("x".repeat(300)))
+        assertEquals(PlaylistNames.MAX, PlaylistNames.limit(long).codePointCount(0, PlaylistNames.limit(long).length))
     }
 }

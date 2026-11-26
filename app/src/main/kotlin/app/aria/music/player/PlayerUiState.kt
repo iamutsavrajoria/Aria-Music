@@ -30,6 +30,8 @@ sealed interface PlayerMessage {
     data class QueueFull(val dropped: Int) : PlayerMessage
     /** A like/unlike could not be saved (database error). */
     data object LikeFailed : PlayerMessage
+    /** A playlist could not be created, renamed, deleted or changed (database error). */
+    data object PlaylistFailed : PlayerMessage
     /** Search history could not be saved, removed or cleared (database error). */
     data object HistoryFailed : PlayerMessage
     /** A manual Home refresh failed or was impossible (offline); the saved content stays on screen. */

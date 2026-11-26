@@ -44,16 +44,22 @@ fun AddToPlaylistDialog(track: Track, onDismiss: () -> Unit, viewModel: Playlist
     var failed by rememberSaveable { mutableStateOf(false) }
     var naming by rememberSaveable { mutableStateOf(false) }
 
-    fun run(name: String, block: suspend () -> Boolean) {
+    fun run(name: String, block: suspend () -> PlaylistPickerViewModel.Outcome) {
         scope.launch {
-            try { if (block()) { added = name; failed = false } else failed = true } catch (e: CancellationException) { throw e } catch (e: Exception) { failed = true }
+            try {
+                when (block()) {
+                    is PlaylistPickerViewModel.Outcome.Added -> { added = name; failed = false }
+                    PlaylistPickerViewModel.Outcome.Busy -> Unit
+                    PlaylistPickerViewModel.Outcome.BlankName -> failed = true
+                }
+            } catch (e: CancellationException) { throw e } catch (e: Exception) { failed = true }
         }
     }
 
     if (naming) {
         NameDialog(R.string.playlist_name_title_new, "", onConfirm = { raw ->
             naming = false
-            run(PlaylistNames.clean(raw).orEmpty()) { viewModel.createAndAdd(raw, track) != null }
+            run(PlaylistNames.clean(raw).orEmpty()) { viewModel.createAndAdd(raw, track) }
         }, onDismiss = { naming = false })
         return
     }
@@ -71,7 +77,7 @@ fun AddToPlaylistDialog(track: Track, onDismiss: () -> Unit, viewModel: Playlist
                     }
                     item(key = "new") { PickerRow(stringResource(R.string.playlist_new), Modifier.testTag(TAG_PICKER_NEW)) { naming = true } }
                     items(playlists, key = { "p:" + it.id }) { p ->
-                        PickerRow(p.title, Modifier.testTag("picker:playlist:${p.id}")) { run(p.title) { viewModel.addTo(p.id, track); true } }
+                        PickerRow(p.title, Modifier.testTag("picker:playlist:${p.id}")) { run(p.title) { viewModel.addTo(p.id, track) } }
                     }
                 }
             }
