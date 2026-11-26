@@ -137,8 +137,10 @@ private fun HistoryRow(seconds: Int, onChange: (Int) -> Unit) {
         Slider(
             value = drag,
             onValueChange = { raw -> drag = raw; val next = snap(raw); if (next != seconds) onChange(next) },
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(TAG_SETTINGS_HISTORY)
-                .semantics { contentDescription = title; stateDescription = valueText },
+            // The semantics node is outside the sizing so its bounds are the 48dp target (the slider itself measures 44dp) and merges the slider into one node.
+            modifier = Modifier.testTag(TAG_SETTINGS_HISTORY)
+                .semantics(mergeDescendants = true) { contentDescription = title; stateDescription = valueText }
+                .fillMaxWidth().heightIn(min = 48.dp),
             valueRange = SettingsChoices.HISTORY_MIN_S.toFloat()..SettingsChoices.HISTORY_MAX_S.toFloat(),
             steps = (SettingsChoices.HISTORY_MAX_S - SettingsChoices.HISTORY_MIN_S) / SettingsChoices.HISTORY_STEP_S - 1,
         )
