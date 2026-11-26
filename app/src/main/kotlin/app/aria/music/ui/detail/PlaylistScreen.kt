@@ -20,7 +20,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -36,6 +38,7 @@ import app.aria.music.ui.common.LoadingState
 import app.aria.music.ui.common.OfflineState
 import app.aria.music.ui.common.TrackMenuAction
 import app.aria.music.ui.common.TrackRow
+import app.aria.music.ui.playlists.AddToPlaylistDialog
 
 /** How many rows before the end the next page is requested. */
 private const val PREFETCH_ROWS = 5
@@ -48,6 +51,7 @@ data class PlaylistActions(
     val onLoadMore: () -> Unit,
     val onTrackMenu: (Track, TrackMenuAction) -> Unit,
     val onRetry: () -> Unit,
+    val onAddToPlaylist: (Track) -> Unit = {},
 )
 
 @Composable
@@ -88,7 +92,7 @@ private fun PlaylistList(state: PlaylistUiState.Content, actions: PlaylistAction
             }
         }
         itemsIndexed(tracks, key = { i, t -> "track:$i:${t.id.raw}" }) { i, t ->
-            TrackRow(t, onClick = { actions.onPlay(i) }, onMenu = { actions.onTrackMenu(t, it) }, modifier = Modifier.testTag("detail:track:$i"), liked = t.id in state.liked)
+            TrackRow(t, onClick = { actions.onPlay(i) }, onMenu = { actions.onTrackMenu(t, it) }, modifier = Modifier.testTag("detail:track:$i"), liked = t.id in state.liked, extraActions = listOf(R.string.track_add_to_playlist to { actions.onAddToPlaylist(t) }))
         }
         if (state.loadingMore) item(key = "footer:loading") {
             Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -107,11 +111,13 @@ private fun PlaylistList(state: PlaylistUiState.Content, actions: PlaylistAction
 @Composable
 fun PlaylistScreen(onBack: () -> Unit, viewModel: PlaylistViewModel = hiltViewModel()) {
     val state = viewModel.state.collectAsStateWithLifecycle().value
+    var pending by remember { mutableStateOf<Track?>(null) }
     val actions = remember(viewModel, onBack) {
         PlaylistActions(
             onBack = onBack, onPlay = viewModel::play, onShuffle = viewModel::shuffle, onAddToQueue = viewModel::addToQueue,
-            onLoadMore = viewModel::loadMore, onTrackMenu = viewModel::trackAction, onRetry = viewModel::retry,
+            onLoadMore = viewModel::loadMore, onTrackMenu = viewModel::trackAction, onRetry = viewModel::retry, onAddToPlaylist = { pending = it },
         )
     }
     PlaylistContent(state, actions)
+    pending?.let { AddToPlaylistDialog(it, onDismiss = { pending = null }) }
 }

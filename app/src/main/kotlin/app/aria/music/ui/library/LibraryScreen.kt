@@ -11,8 +11,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
@@ -23,11 +23,11 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -48,6 +48,9 @@ import app.aria.music.ui.common.EmptyState
 import app.aria.music.ui.common.ErrorState
 import app.aria.music.ui.common.LoadingState
 import app.aria.music.ui.common.TrackRow
+import app.aria.music.ui.playlists.AddToPlaylistDialog
+import app.aria.music.ui.playlists.NameDialog
+import app.aria.music.ui.playlists.TAG_NEW_PLAYLIST
 import kotlinx.coroutines.delay
 
 const val TAG_LIBRARY_LIST = "library:list"
@@ -66,6 +69,8 @@ data class LibraryActions(
     val onOpenAlbum: (String) -> Unit,
     val onOpenArtist: (String) -> Unit,
     val onOpenPlaylist: (String) -> Unit,
+    val onNewPlaylist: (String) -> Unit = {},
+    val onAddToPlaylist: (Track) -> Unit = {},
 )
 
 @StringRes private fun LibraryTab.label() = when (this) {
@@ -99,6 +104,7 @@ fun LibraryContent(state: LibraryUiState, actions: LibraryActions, modifier: Mod
             FilterChip(state.sort == LibrarySort.RECENTLY_ADDED, { actions.onSort(LibrarySort.RECENTLY_ADDED) }, { Text(stringResource(R.string.library_sort_recent)) })
             FilterChip(state.sort == LibrarySort.TITLE, { actions.onSort(LibrarySort.TITLE) }, { Text(stringResource(R.string.library_sort_title)) })
         }
+        if (state.tab == LibraryTab.PLAYLISTS) NewPlaylistButton(actions.onNewPlaylist)
         // A bounded slot: the states fill it, the lists scroll inside it.
         Column(Modifier.weight(1f).fillMaxWidth()) {
             when (val c = state.content) {
@@ -132,6 +138,15 @@ fun LibraryContent(state: LibraryUiState, actions: LibraryActions, modifier: Mod
             }
         }
     }
+}
+
+@Composable
+private fun NewPlaylistButton(onCreate: (String) -> Unit) {
+    var naming by rememberSaveable { mutableStateOf(false) }
+    OutlinedButton({ naming = true }, Modifier.padding(horizontal = 16.dp).heightIn(min = 48.dp).testTag(TAG_NEW_PLAYLIST)) {
+        Icon(AriaIcons.Add, null, Modifier.size(18.dp)); Text(stringResource(R.string.playlist_new), Modifier.padding(start = 8.dp))
+    }
+    if (naming) NameDialog(R.string.playlist_name_title_new, "", { naming = false; onCreate(it) }, { naming = false })
 }
 
 /** The text is local so typing stays instant; the repository query follows 150 ms after the last keystroke. */
@@ -175,6 +190,7 @@ private fun SongList(rows: List<LibrarySong>, actions: LibraryActions) {
                     add(R.string.track_play_next to { actions.onTrackMenu(t, LibraryTrackAction.PLAY_NEXT) })
                     add(R.string.track_add_to_queue to { actions.onTrackMenu(t, LibraryTrackAction.ADD_TO_QUEUE) })
                     if (r.liked) add(R.string.library_remove_like to { actions.onTrackMenu(t, LibraryTrackAction.UNLIKE) })
+                    add(R.string.track_add_to_playlist to { actions.onAddToPlaylist(t) })
                     add(R.string.library_remove_from_library to { actions.onTrackMenu(t, LibraryTrackAction.REMOVE_FROM_LIBRARY) })
                 },
             )
@@ -190,12 +206,15 @@ fun LibraryScreen(
     viewModel: LibraryViewModel = hiltViewModel(),
 ) {
     val state = viewModel.state.collectAsStateWithLifecycle().value
+    var pending by remember { mutableStateOf<Track?>(null) }
     val actions = remember(viewModel, onAlbum, onArtist, onPlaylist) {
         LibraryActions(
             onTab = viewModel::setTab, onQuery = viewModel::setQuery, onSort = viewModel::setSort,
             onPlaySong = viewModel::play, onPlayAll = viewModel::playAll, onShuffleAll = viewModel::shuffleAll, onTrackMenu = viewModel::trackAction,
             onOpenAlbum = onAlbum, onOpenArtist = onArtist, onOpenPlaylist = onPlaylist,
+            onNewPlaylist = viewModel::createPlaylist, onAddToPlaylist = { pending = it },
         )
     }
     LibraryContent(state, actions)
+    pending?.let { AddToPlaylistDialog(it, onDismiss = { pending = null }) }
 }

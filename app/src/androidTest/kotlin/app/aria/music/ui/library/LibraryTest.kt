@@ -89,4 +89,25 @@ class LibraryTest {
         rule.onNodeWithContentDescription(str(R.string.library_play_all_desc)).performClick(); rule.onNodeWithContentDescription(str(R.string.library_shuffle_all_desc)).performClick()
         assertEquals(listOf("playAll", "shuffleAll"), log)
     }
+
+    @Test fun newPlaylistIsOfferedOnTheEmptyPlaylistsTabAndRejectsBlankNames() {
+        log.clear()
+        rule.setContent { AriaTestTheme { LibraryContent(state(LibraryContent.Empty, LibraryTab.PLAYLISTS), actions.copy(onNewPlaylist = { log += "new:$it" })) } }
+        rule.onNodeWithTag("playlist:new").assertHeightIsAtLeast(48.dp).performClick()
+        rule.onNodeWithText(str(R.string.playlist_name_confirm)).assertIsNotEnabled()
+        rule.onNodeWithTag("name:field").performTextInput("  Road trip "); rule.onNodeWithText(str(R.string.playlist_name_confirm)).performClick()
+        assertEquals(listOf("new:Road trip"), log)
+    }
+
+    @Test fun newPlaylistIsNotOnTheSongsTab() {
+        show(state(songs(2))); rule.onNodeWithTag("playlist:new").assertDoesNotExist()
+    }
+
+    @Test fun songMenuOffersAddToPlaylist() {
+        log.clear()
+        rule.setContent { AriaTestTheme { LibraryContent(state(songs(2)), actions.copy(onAddToPlaylist = { log += "add:${it.title}" })) } }
+        rule.onNodeWithContentDescription(str(R.string.track_more, "Song 2")).performClick()
+        rule.onNodeWithText(str(R.string.track_add_to_playlist)).performClick()
+        assertEquals(listOf("add:Song 2"), log)
+    }
 }

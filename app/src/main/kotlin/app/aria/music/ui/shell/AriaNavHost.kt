@@ -15,6 +15,7 @@ import app.aria.music.ui.detail.ArtistScreen
 import app.aria.music.ui.detail.PlaylistScreen
 import app.aria.music.ui.home.HomeScreen
 import app.aria.music.ui.library.LibraryScreen
+import app.aria.music.ui.playlists.LocalPlaylistScreen
 import app.aria.music.ui.nowplaying.NowPlayingScreen
 import app.aria.music.ui.queue.QueueScreen
 import app.aria.music.ui.search.SearchScreen
@@ -34,33 +35,32 @@ fun AriaNavHost(
     NavHost(nav, startDestination = HomeRoute, modifier = modifier) {
         composable<HomeRoute> {
             home(
-                { nav.navigate(AlbumRoute(it)) },
-                { nav.navigate(ArtistRoute(it)) },
-                { nav.navigate(PlaylistRoute(it, local = false)) },
+                { nav.navigate(AlbumRoute(it)) { launchSingleTop = true } },
+                { nav.navigate(ArtistRoute(it)) { launchSingleTop = true } },
+                { nav.navigate(PlaylistRoute(it, local = false)) { launchSingleTop = true } },
                 { nav.navigate(SettingsRoute) { launchSingleTop = true } },
             )
         }
         composable<SearchRoute> {
             search(
-                { nav.navigate(AlbumRoute(it)) },
-                { nav.navigate(ArtistRoute(it)) },
-                { nav.navigate(PlaylistRoute(it, local = false)) },
+                { nav.navigate(AlbumRoute(it)) { launchSingleTop = true } },
+                { nav.navigate(ArtistRoute(it)) { launchSingleTop = true } },
+                { nav.navigate(PlaylistRoute(it, local = false)) { launchSingleTop = true } },
             )
         }
         composable<AlbumRoute> {
-            AlbumScreen(onBack = { nav.popBackStack() }, onAlbum = { nav.navigate(AlbumRoute(it)) })
+            AlbumScreen(onBack = { nav.popBackStack() }, onAlbum = { nav.navigate(AlbumRoute(it)) { launchSingleTop = true } })
         }
         composable<ArtistRoute> {
             ArtistScreen(
                 onBack = { nav.popBackStack() },
-                onAlbum = { nav.navigate(AlbumRoute(it)) },
-                onArtist = { nav.navigate(ArtistRoute(it)) },
-                onPlaylist = { nav.navigate(PlaylistRoute(it, local = false)) },
+                onAlbum = { nav.navigate(AlbumRoute(it)) { launchSingleTop = true } },
+                onArtist = { nav.navigate(ArtistRoute(it)) { launchSingleTop = true } },
+                onPlaylist = { nav.navigate(PlaylistRoute(it, local = false)) { launchSingleTop = true } },
             )
         }
         composable<PlaylistRoute> { entry ->
-            // Temporary for local playlists until Task 20; the remote page is real.
-            if (entry.toRoute<PlaylistRoute>().local) Placeholder(R.string.coming_soon) else PlaylistScreen(onBack = { nav.popBackStack() })
+            if (entry.toRoute<PlaylistRoute>().local) LocalPlaylistScreen(onBack = { nav.popBackStack() }) else PlaylistScreen(onBack = { nav.popBackStack() })
         }
         // Temporary until Task 21 builds the Settings screen.
         composable<SettingsRoute> { Placeholder(R.string.coming_soon) }
@@ -68,9 +68,9 @@ fun AriaNavHost(
         composable<QueueRoute> { queue { nav.popBackStack() } }
         composable<LibraryRoute> {
             LibraryScreen(
-                onAlbum = { nav.navigate(AlbumRoute(it)) },
-                onArtist = { nav.navigate(ArtistRoute(it)) },
-                onPlaylist = { nav.navigate(PlaylistRoute(it, local = true)) },
+                onAlbum = { nav.navigate(AlbumRoute(it)) { launchSingleTop = true } },
+                onArtist = { nav.navigate(ArtistRoute(it)) { launchSingleTop = true } },
+                onPlaylist = { nav.navigate(PlaylistRoute(it, local = true)) { launchSingleTop = true } },
             )
         }
     }

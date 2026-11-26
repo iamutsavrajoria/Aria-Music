@@ -95,4 +95,17 @@ class AlbumViewModelTest {
         e.vm.play(650)
         assertEquals(50, e.engine.playNowCalls.single().first.size); assertEquals(listOf<PlayerMessage>(PlayerMessage.QueueWindowed(50, 700)), e.messages)
     }
+
+    @Test fun toggleSavedFlipsTheStoredValueNotTheScreensCopy() = runTest(dispatcher) {
+        val e = Env(backgroundScope); e.library.setAlbumSaved(Samples.album(1), true)
+        e.vm.toggleSaved()
+        assertFalse((e.vm.state.value as AlbumUiState.Content).saved); assertEquals(emptyList(), e.library.albums("", LibrarySort.TITLE).first())
+    }
+
+    @Test fun backToBackTogglesAlternate() = runTest(dispatcher) {
+        val writes = mutableListOf<Boolean>(); val base = FakeLibraryRepository()
+        val e = Env(backgroundScope, library = object : LibraryRepository by base { override suspend fun setAlbumSaved(album: AlbumRef, saved: Boolean) { writes += saved; base.setAlbumSaved(album, saved) } })
+        e.vm.toggleSaved(); e.vm.toggleSaved(); e.vm.toggleSaved()
+        assertEquals(listOf(true, false, true), writes)
+    }
 }

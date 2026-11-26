@@ -11,7 +11,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
@@ -27,6 +30,7 @@ import app.aria.music.ui.common.OfflineState
 import app.aria.music.ui.common.Tile
 import app.aria.music.ui.common.TrackMenuAction
 import app.aria.music.ui.common.TrackRow
+import app.aria.music.ui.playlists.AddToPlaylistDialog
 
 data class AlbumActions(
     val onBack: () -> Unit,
@@ -37,6 +41,7 @@ data class AlbumActions(
     val onTrackMenu: (Track, TrackMenuAction) -> Unit,
     val onOpenAlbum: (String) -> Unit,
     val onRetry: () -> Unit,
+    val onAddToPlaylist: (Track) -> Unit = {},
 )
 
 @Composable
@@ -71,7 +76,7 @@ private fun AlbumList(state: AlbumUiState.Content, actions: AlbumActions) {
             }
         }
         itemsIndexed(tracks, key = { i, t -> "track:$i:${t.id.raw}" }) { i, t ->
-            TrackRow(t, onClick = { actions.onPlay(i) }, onMenu = { actions.onTrackMenu(t, it) }, modifier = Modifier.testTag("detail:track:$i"), liked = t.id in state.liked)
+            TrackRow(t, onClick = { actions.onPlay(i) }, onMenu = { actions.onTrackMenu(t, it) }, modifier = Modifier.testTag("detail:track:$i"), liked = t.id in state.liked, extraActions = listOf(R.string.track_add_to_playlist to { actions.onAddToPlaylist(t) }))
         }
         if (others.isNotEmpty()) {
             item(key = "other:title") { SectionTitle(stringResource(R.string.detail_other_versions)) }
@@ -92,11 +97,13 @@ private fun AlbumList(state: AlbumUiState.Content, actions: AlbumActions) {
 @Composable
 fun AlbumScreen(onBack: () -> Unit, onAlbum: (String) -> Unit, viewModel: AlbumViewModel = hiltViewModel()) {
     val state = viewModel.state.collectAsStateWithLifecycle().value
+    var pending by remember { mutableStateOf<Track?>(null) }
     val actions = remember(viewModel, onBack, onAlbum) {
         AlbumActions(
             onBack = onBack, onPlay = viewModel::play, onShuffle = viewModel::shuffle, onAddToQueue = viewModel::addToQueue, onToggleSaved = viewModel::toggleSaved,
-            onTrackMenu = viewModel::trackAction, onOpenAlbum = onAlbum, onRetry = viewModel::retry,
+            onTrackMenu = viewModel::trackAction, onOpenAlbum = onAlbum, onRetry = viewModel::retry, onAddToPlaylist = { pending = it },
         )
     }
     AlbumContent(state, actions)
+    pending?.let { AddToPlaylistDialog(it, onDismiss = { pending = null }) }
 }

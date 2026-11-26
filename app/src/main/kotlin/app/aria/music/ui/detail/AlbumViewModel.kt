@@ -23,10 +23,13 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 sealed interface AlbumUiState {
     data object Loading : AlbumUiState
@@ -90,9 +93,12 @@ class AlbumViewModel @Inject constructor(
     fun shuffle() = controller.play(tracks().shuffled(), 0)
     fun addToQueue() { tracks().let { if (it.isNotEmpty()) controller.addToQueue(it) } }
 
+    private val writes = Mutex()
+
+    /** Flips the stored value: it is read inside the write (one at a time), so a double tap or a stale screen cannot set the same value twice. */
     fun toggleSaved() {
-        val c = state.value as? AlbumUiState.Content ?: return
-        guardedWrite(controller) { library.setAlbumSaved(c.detail.album, !c.saved) }
+        val album = (load.value as? Load.Done)?.detail?.album ?: return
+        guardedWrite(controller) { writes.withLock { library.setAlbumSaved(album, !library.isAlbumSaved(album.id).first()) } }
     }
 
     fun trackAction(t: Track, a: TrackMenuAction) = runTrackAction(library, controller, t, a)

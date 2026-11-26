@@ -13,6 +13,7 @@ import app.aria.domain.PlaylistRepository
 import app.aria.domain.Track
 import app.aria.music.player.PlayerController
 import app.aria.music.player.PlayerMessage
+import app.aria.music.ui.playlists.PlaylistNames
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.CancellationException
@@ -99,6 +100,12 @@ class LibraryViewModel @Inject constructor(
     private fun visibleTracks(): List<Track> = (state.value.content as? LibraryContent.Songs)?.rows?.map { it.track }.orEmpty()
     fun playAll() { visibleTracks().let { if (it.isNotEmpty()) controller.play(it, 0) } }
     fun shuffleAll() { visibleTracks().let { if (it.isNotEmpty()) controller.play(it.shuffled(), 0) } }
+
+    /** A blank name is ignored (the dialog does not offer it either); the new playlist appears through the Playlists flow. */
+    fun createPlaylist(name: String) {
+        val n = PlaylistNames.clean(name) ?: return
+        guardedWrite { playlists.create(n) }
+    }
 
     fun trackAction(t: Track, a: LibraryTrackAction) {
         when (a) {

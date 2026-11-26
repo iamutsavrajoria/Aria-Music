@@ -21,7 +21,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -44,6 +47,7 @@ import app.aria.music.ui.common.ShelfActions
 import app.aria.music.ui.common.ShelfRow
 import app.aria.music.ui.common.TrackMenuAction
 import app.aria.music.ui.common.TrackRow
+import app.aria.music.ui.playlists.AddToPlaylistDialog
 
 private val STATE_HEIGHT = 280.dp
 
@@ -59,6 +63,7 @@ data class HomeActions(
     val onRefresh: () -> Unit,
     val onOpenSettings: () -> Unit,
     val onTrackMenu: (Track, TrackMenuAction) -> Unit,
+    val onAddToPlaylist: (Track) -> Unit = {},
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -104,6 +109,7 @@ private fun androidx.compose.foundation.lazy.LazyListScope.localSection(
             TrackRow(
                 track, { actions.onPlay(tracks, i) }, { actions.onTrackMenu(track, it) },
                 Modifier.testTag("home:$name:$i"), liked = track.id in state.liked,
+                extraActions = listOf(R.string.track_add_to_playlist to { actions.onAddToPlaylist(track) }),
             )
         }
     }
@@ -167,10 +173,11 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel(),
 ) {
     val state = viewModel.state.collectAsStateWithLifecycle().value
+    var pending by remember { mutableStateOf<Track?>(null) }
     val actions = remember(viewModel, onAlbum, onArtist, onPlaylist, onSettings) {
         HomeActions(
             onPlay = viewModel::play, onOpenAlbum = onAlbum, onOpenArtist = onArtist, onOpenPlaylist = onPlaylist,
-            onRefresh = viewModel::refresh, onOpenSettings = onSettings,
+            onRefresh = viewModel::refresh, onOpenSettings = onSettings, onAddToPlaylist = { pending = it },
             onTrackMenu = { track, action ->
                 when (action) {
                     TrackMenuAction.PLAY_NEXT -> viewModel.playNext(track)
@@ -182,4 +189,5 @@ fun HomeScreen(
         )
     }
     HomeContent(state, actions)
+    pending?.let { AddToPlaylistDialog(it, onDismiss = { pending = null }) }
 }

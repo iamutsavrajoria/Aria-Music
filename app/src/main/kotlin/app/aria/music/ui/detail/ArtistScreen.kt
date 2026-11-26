@@ -10,7 +10,10 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -27,6 +30,7 @@ import app.aria.music.ui.common.ShelfActions
 import app.aria.music.ui.common.ShelfRow
 import app.aria.music.ui.common.TrackMenuAction
 import app.aria.music.ui.common.TrackRow
+import app.aria.music.ui.playlists.AddToPlaylistDialog
 
 data class ArtistActions(
     val onBack: () -> Unit,
@@ -39,6 +43,7 @@ data class ArtistActions(
     val onOpenPlaylist: (String) -> Unit,
     val onTrackMenu: (Track, TrackMenuAction) -> Unit,
     val onRetry: () -> Unit,
+    val onAddToPlaylist: (Track) -> Unit = {},
 )
 
 @Composable
@@ -83,7 +88,7 @@ private fun ArtistList(state: ArtistUiState.Content, actions: ArtistActions) {
                 // A shelf of songs only reads as a list of rows that play from the tapped one.
                 item(key = "shelf:$i:title") { SectionTitle(shelf.title) }
                 itemsIndexed(songs, key = { j, t -> "shelf:$i:song:$j:${t.id.raw}" }) { j, t ->
-                    TrackRow(t, onClick = { actions.onPlaySongs(songs, j) }, onMenu = { actions.onTrackMenu(t, it) }, modifier = Modifier.testTag("detail:shelf:$i:$j"), liked = t.id in state.liked)
+                    TrackRow(t, onClick = { actions.onPlaySongs(songs, j) }, onMenu = { actions.onTrackMenu(t, it) }, modifier = Modifier.testTag("detail:shelf:$i:$j"), liked = t.id in state.liked, extraActions = listOf(R.string.track_add_to_playlist to { actions.onAddToPlaylist(t) }))
                 }
             } else {
                 item(key = "shelf:$i") { ShelfRow(shelf, "artist:shelf:$i", shelfActions) }
@@ -101,12 +106,14 @@ fun ArtistScreen(
     viewModel: ArtistViewModel = hiltViewModel(),
 ) {
     val state = viewModel.state.collectAsStateWithLifecycle().value
+    var pending by remember { mutableStateOf<Track?>(null) }
     val actions = remember(viewModel, onBack, onAlbum, onArtist, onPlaylist) {
         ArtistActions(
             onBack = onBack, onPlayTop = viewModel::playTop, onShuffleTop = viewModel::shuffleTop, onToggleFollowed = viewModel::toggleFollowed,
             onPlaySongs = viewModel::playShelfSongs, onOpenAlbum = onAlbum, onOpenArtist = onArtist, onOpenPlaylist = onPlaylist,
-            onTrackMenu = viewModel::trackAction, onRetry = viewModel::retry,
+            onTrackMenu = viewModel::trackAction, onRetry = viewModel::retry, onAddToPlaylist = { pending = it },
         )
     }
     ArtistContent(state, actions)
+    pending?.let { AddToPlaylistDialog(it, onDismiss = { pending = null }) }
 }

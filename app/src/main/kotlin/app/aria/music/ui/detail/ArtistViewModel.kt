@@ -24,10 +24,13 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 sealed interface ArtistUiState {
     data object Loading : ArtistUiState
@@ -93,9 +96,12 @@ class ArtistViewModel @Inject constructor(
     fun shuffleTop() = controller.play(top().shuffled(), 0)
     fun playShelfSongs(tracks: List<Track>, index: Int) = controller.play(tracks, index)
 
+    private val writes = Mutex()
+
+    /** Flips the stored value: it is read inside the write (one at a time), so a double tap or a stale screen cannot set the same value twice. */
     fun toggleFollowed() {
-        val c = state.value as? ArtistUiState.Content ?: return
-        guardedWrite(controller) { library.setArtistFollowed(c.detail.artist, !c.followed) }
+        val artist = (load.value as? Load.Done)?.detail?.artist ?: return
+        guardedWrite(controller) { writes.withLock { library.setArtistFollowed(artist, !library.isArtistFollowed(artist.id).first()) } }
     }
 
     fun trackAction(t: Track, a: TrackMenuAction) = runTrackAction(library, controller, t, a)

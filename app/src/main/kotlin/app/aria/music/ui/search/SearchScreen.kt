@@ -23,7 +23,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -55,6 +58,7 @@ import app.aria.music.ui.common.LoadingState
 import app.aria.music.ui.common.OfflineState
 import app.aria.music.ui.common.TrackMenuAction
 import app.aria.music.ui.common.TrackRow
+import app.aria.music.ui.playlists.AddToPlaylistDialog
 
 data class SearchActions(
     val onQueryChange: (String) -> Unit,
@@ -67,6 +71,7 @@ data class SearchActions(
     val onOpenAlbum: (String) -> Unit,
     val onOpenArtist: (String) -> Unit,
     val onOpenPlaylist: (String) -> Unit,
+    val onAddToPlaylist: (Track) -> Unit = {},
 )
 
 /** One line of the grouped results list. [key] is unique within the list even when the source ids repeat. */
@@ -180,7 +185,7 @@ private fun ResultsList(results: SearchResults, liked: Set<TrackId>, actions: Se
                     Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp).semantics { heading() },
                     style = MaterialTheme.typography.titleMedium,
                 )
-                is ResultRow.Song -> TrackRow(row.track, { actions.onPlaySong(results.songs, row.index) }, { actions.onTrackMenu(row.track, it) }, liked = row.track.id in liked)
+                is ResultRow.Song -> TrackRow(row.track, { actions.onPlaySong(results.songs, row.index) }, { actions.onTrackMenu(row.track, it) }, liked = row.track.id in liked, extraActions = listOf(R.string.track_add_to_playlist to { actions.onAddToPlaylist(row.track) }))
                 is ResultRow.Album -> BrowseRow(
                     row.album.thumbnailUrl, row.album.title,
                     (row.album.artists + listOfNotNull(row.album.year?.toString())).joinToString(stringResource(R.string.artist_separator)),
@@ -201,6 +206,7 @@ fun SearchScreen(
     viewModel: SearchViewModel = hiltViewModel(),
 ) {
     val state = viewModel.state.collectAsStateWithLifecycle().value
+    var pending by remember { mutableStateOf<Track?>(null) }
     val actions = remember(viewModel, onAlbum, onArtist, onPlaylist) {
         SearchActions(
             onQueryChange = viewModel::onQueryChange, onSubmit = { viewModel.submit(it) }, onRetry = viewModel::retry,
@@ -214,8 +220,9 @@ fun SearchScreen(
                     TrackMenuAction.UNLIKE -> viewModel.toggleLike(track, false)
                 }
             },
-            onOpenAlbum = onAlbum, onOpenArtist = onArtist, onOpenPlaylist = onPlaylist,
+            onOpenAlbum = onAlbum, onOpenArtist = onArtist, onOpenPlaylist = onPlaylist, onAddToPlaylist = { pending = it },
         )
     }
     SearchContent(state, actions)
+    pending?.let { AddToPlaylistDialog(it, onDismiss = { pending = null }) }
 }

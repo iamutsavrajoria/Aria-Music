@@ -74,4 +74,18 @@ class PlaylistViewModelTest {
         assertEquals(setOf(t.id), (e.vm.state.value as PlaylistUiState.Content).liked)
         e.vm.trackAction(t, TrackMenuAction.UNLIKE); assertTrue((e.vm.state.value as PlaylistUiState.Content).liked.isEmpty())
     }
+
+    @Test fun aPageWithNothingNewEndsPaging() = runTest(dispatcher) {
+        val e = Env(backgroundScope); e.fake!!.more["c1"] = Result.success(TrackPage(Samples.tracks(2), "c2"))
+        e.vm.loadMore()
+        val c = e.vm.state.value as PlaylistUiState.Content
+        assertEquals(2, c.detail.tracks.size); assertNull(c.detail.continuation); assertFalse(c.loadingMore)
+    }
+
+    @Test fun theSameContinuationTokenEndsPaging() = runTest(dispatcher) {
+        val e = Env(backgroundScope); e.fake!!.more["c1"] = Result.success(TrackPage(Samples.tracks(1, from = 7), "c1"))
+        e.vm.loadMore()
+        val c = e.vm.state.value as PlaylistUiState.Content
+        assertEquals(3, c.detail.tracks.size); assertNull(c.detail.continuation)
+    }
 }

@@ -79,7 +79,10 @@ class PlaylistViewModel @Inject constructor(
             core.value = result.fold(
                 { page ->
                     val known = now.detail.tracks.mapTo(HashSet()) { it.id }
-                    PlaylistUiState.Content(now.detail.copy(tracks = now.detail.tracks + page.tracks.filter { known.add(it.id) }, continuation = page.continuation), loadingMore = false, moreFailed = false)
+                    val added = page.tracks.filter { known.add(it.id) }
+                    // A page with nothing new, or the same token again, ends paging: otherwise the near-end auto-load would loop forever.
+                    val next = page.continuation.takeUnless { added.isEmpty() || it == token }
+                    PlaylistUiState.Content(now.detail.copy(tracks = now.detail.tracks + added, continuation = next), loadingMore = false, moreFailed = false)
                 },
                 { now.copy(loadingMore = false, moreFailed = true) },
             )

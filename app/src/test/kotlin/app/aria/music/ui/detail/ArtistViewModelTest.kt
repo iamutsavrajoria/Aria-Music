@@ -68,4 +68,10 @@ class ArtistViewModelTest {
         e.vm.trackAction(t, TrackMenuAction.UNLIKE); assertTrue((e.vm.state.value as ArtistUiState.Content).liked.isEmpty())
         e.vm.trackAction(t, TrackMenuAction.PLAY_NEXT); assertTrue("playNext" in e.engine.calls)
     }
+
+    @Test fun toggleFollowedFlipsTheStoredValueNotTheScreensCopy() = runTest(dispatcher) {
+        val e = Env(backgroundScope); e.library.setArtistFollowed(Samples.artist(1), true)
+        e.vm.toggleFollowed()
+        assertFalse((e.vm.state.value as ArtistUiState.Content).followed); assertEquals(emptyList(), e.library.artists("", LibrarySort.TITLE).first())
+    }
 }
