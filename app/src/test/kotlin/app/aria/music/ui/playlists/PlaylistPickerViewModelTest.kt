@@ -50,6 +50,45 @@ class PlaylistPickerViewModelTest {
         vm.createAndAdd("Mix", Samples.track(2)); assertEquals(2, base.playlists("", LibrarySort.TITLE).first().size)
     }
 
+    @Test fun aDismissedDialogDoesNotLeaveAPlaylistForTheNextOneToReuse() = runTest(dispatcher) {
+        val base = FakePlaylistRepository(); var fail = true
+        val repo = object : PlaylistRepository by base { override suspend fun addTracks(id: String, tracks: List<Track>) { if (fail) error("db"); base.addTracks(id, tracks) } }
+        val vm = PlaylistPickerViewModel(repo)
+        assertFailsWith<IllegalStateException> { vm.createAndAdd("Mix", Samples.track(1)) }
+        vm.dismissed(); fail = false
+        vm.createAndAdd("Mix", Samples.track(1))
+        assertEquals(2, base.playlists("", LibrarySort.TITLE).first().size)   // the abandoned empty one plus a fresh one
+    }
+
+    @Test fun theCreatedPlaylistIsNotReusedForADifferentSong() = runTest(dispatcher) {
+        val base = FakePlaylistRepository(); var fail = true
+        val repo = object : PlaylistRepository by base { override suspend fun addTracks(id: String, tracks: List<Track>) { if (fail) error("db"); base.addTracks(id, tracks) } }
+        val vm = PlaylistPickerViewModel(repo)
+        assertFailsWith<IllegalStateException> { vm.createAndAdd("Mix", Samples.track(1)) }
+        fail = false
+        val id = (vm.createAndAdd("Mix", Samples.track(2)) as PlaylistPickerViewModel.Outcome.Added).playlistId
+        assertEquals(2, base.playlists("", LibrarySort.TITLE).first().size)
+        assertEquals(listOf(Samples.track(2).id), base.tracks(id).first().map { it.track.id })
+    }
+
+    @Test fun aRememberedPlaylistThatWasDeletedMeanwhileGetsOneFreshRetry() = runTest(dispatcher) {
+        val base = FakePlaylistRepository(); var phase = 0   // 0: fail the first add; 1: the remembered playlist is gone
+        val repo = object : PlaylistRepository by base {
+            override suspend fun addTracks(id: String, tracks: List<Track>) {
+                if (phase == 0) error("db")
+                if (phase == 1 && base.playlist(id).first() == null) error("gone")
+                base.addTracks(id, tracks)
+            }
+        }
+        val vm = PlaylistPickerViewModel(repo)
+        assertFailsWith<IllegalStateException> { vm.createAndAdd("Mix", Samples.track(1)) }
+        val stale = base.playlists("", LibrarySort.TITLE).first().single().id
+        base.delete(stale); phase = 1
+        val id = (vm.createAndAdd("Mix", Samples.track(1)) as PlaylistPickerViewModel.Outcome.Added).playlistId
+        assertNotEquals(stale, id)
+        assertEquals(1, base.tracks(id).first().size)
+    }
+
     @Test fun aTapWhileAnAddIsInFlightIsIgnored() = runTest(dispatcher) {
         val base = FakePlaylistRepository(); val id = base.create("Mix"); val gate = CompletableDeferred<Unit>(); var adds = 0
         val repo = object : PlaylistRepository by base { override suspend fun addTracks(id: String, tracks: List<Track>) { adds++; gate.await(); base.addTracks(id, tracks) } }

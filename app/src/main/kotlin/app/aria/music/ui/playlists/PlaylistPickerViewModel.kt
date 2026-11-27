@@ -7,8 +7,10 @@ import app.aria.domain.LibrarySort
 import app.aria.domain.PlaylistRef
 import app.aria.domain.PlaylistRepository
 import app.aria.domain.Track
+import app.aria.domain.TrackId
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
@@ -33,8 +35,12 @@ class PlaylistPickerViewModel @Inject constructor(private val repo: PlaylistRepo
     /** One add at a time: a second tap while one is running is ignored, so a slow write cannot add the song twice. */
     private val busy = Mutex()
 
-    /** A playlist created for a song whose add failed: a retry with the same name reuses it instead of creating a duplicate. */
-    private var created: Pair<String, String>? = null
+    /** A playlist created for a song whose add failed: a retry with the same name and song reuses it instead of creating a duplicate. */
+    private data class Created(val name: String, val trackId: TrackId, val playlistId: String)
+    private var created: Created? = null
+
+    /** The dialog went away: a later dialog (even for the same song and name) starts fresh. */
+    fun dismissed() { created = null }
 
     /** Failures throw (and leave nothing half-done that a retry would repeat). */
     suspend fun addTo(playlistId: String, track: Track): Outcome = exclusive {
@@ -44,8 +50,16 @@ class PlaylistPickerViewModel @Inject constructor(private val repo: PlaylistRepo
     suspend fun createAndAdd(name: String, track: Track): Outcome {
         val clean = PlaylistNames.clean(name) ?: return Outcome.BlankName
         return exclusive {
-            val id = created?.takeIf { it.first == clean }?.second ?: repo.create(clean).also { created = clean to it }
-            repo.addTracks(id, listOf(track))
+            val reused = created?.takeIf { it.name == clean && it.trackId == track.id }?.playlistId
+            val id = when {
+                reused == null -> repo.create(clean).also { created = Created(clean, track.id, it) }
+                // The remembered playlist may have been deleted since the failed attempt: one retry with a fresh playlist.
+                else -> try { repo.addTracks(reused, listOf(track)); reused } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                    created = null
+                    repo.create(clean).also { created = Created(clean, track.id, it) }
+                }
+            }
+            if (id != reused) repo.addTracks(id, listOf(track))
             created = null
             Outcome.Added(id)
         }

@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package app.aria.music.ui.shell
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.padding
@@ -22,26 +24,23 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavController
-import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import app.aria.music.player.PlayerController
 import app.aria.music.player.PlayerMessage
 import app.aria.music.ui.miniplayer.MiniPlayerHost
 import app.aria.music.ui.nowplaying.NowPlayingScreen
+import app.aria.music.ui.onboarding.OnboardingScreen
 import app.aria.music.ui.queue.QueueScreen
 import app.aria.music.ui.home.HomeScreen
 import app.aria.music.ui.search.SearchScreen
 import app.aria.music.ui.settings.SettingsScreen
-import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
-import javax.inject.Inject
 
 @Composable
 fun AriaShellContent(
@@ -76,10 +75,13 @@ fun AriaShellContent(
     )
 }
 
-/** Switches tabs keeping each tab's back stack and state (select Library, drill in, go Home, come back: Library is as it was). */
+/**
+ * Switches tabs keeping each tab's back stack and state (select Library, drill in, go Home, come back: Library is as it was).
+ * Pops to Home, not to the graph's start: on the first run the start is Onboarding, which is gone from the back stack once finished.
+ */
 fun NavController.navigateTopLevel(t: TopLevel) {
     navigate(t.route) {
-        popUpTo(graph.findStartDestination().id) { saveState = true }
+        popUpTo<HomeRoute> { saveState = true }
         launchSingleTop = true
         restoreState = true
     }
@@ -97,15 +99,13 @@ fun PlayerMessageHost(messages: Flow<PlayerMessage>, snackbar: SnackbarHostState
     }
 }
 
-/** Holds the controller so the shell instantiates it at startup (it is a lazy singleton; early engine events must not be lost). */
-@HiltViewModel
-class ShellViewModel @Inject constructor(val controller: PlayerController) : ViewModel()
-
 private val FULL_SCREEN_ROUTES = listOf(NowPlayingRoute::class, QueueRoute::class, SettingsRoute::class, OnboardingRoute::class)
 
 @Composable
 fun AriaRoot(
     controller: PlayerController = hiltViewModel<ShellViewModel>().controller,
+    /** Null while the stored flag is still being read; overridable so tests without a Hilt activity can pick the start destination. */
+    onboardingDone: Boolean? = hiltViewModel<ShellViewModel>().onboardingDone.collectAsStateWithLifecycle().value,
     /** Overridable so tests without a Hilt activity can swap out the Hilt-backed mini player. */
     miniPlayer: @Composable (onExpand: () -> Unit) -> Unit = { MiniPlayerHost(onExpand = it) },
     nowPlaying: @Composable (onBack: () -> Unit, onOpenQueue: () -> Unit) -> Unit = { back, queue -> NowPlayingScreen(back, queue) },
@@ -115,7 +115,12 @@ fun AriaRoot(
     home: @Composable (onAlbum: (String) -> Unit, onArtist: (String) -> Unit, onPlaylist: (String) -> Unit, onSettings: () -> Unit) -> Unit =
         { album, artist, playlist, settings -> HomeScreen(album, artist, playlist, settings) },
     settings: @Composable (onBack: () -> Unit) -> Unit = { back -> SettingsScreen(back) },
+    onboarding: @Composable (onDone: () -> Unit) -> Unit = { done -> OnboardingScreen(done) },
 ) {
+    // Nothing but an empty surface until the flag is known, so a returning user never sees onboarding (or a first-run user Home) flash by.
+    if (onboardingDone == null) { Box(Modifier.fillMaxSize()); return }
+    // Captured once: the flag flips to true when onboarding finishes, and that must not swap the start destination (it would reset the back stack).
+    val start: Any = remember { if (onboardingDone) HomeRoute else OnboardingRoute }
     val nav = rememberNavController()
     val snackbar = remember { SnackbarHostState() }
     val ui by controller.ui.collectAsStateWithLifecycle()
@@ -132,5 +137,5 @@ fun AriaRoot(
         snackbarHost = snackbar,
         miniPlayer = { miniPlayer { nav.navigate(NowPlayingRoute) { launchSingleTop = true } } },
         miniPlayerVisible = !fullScreen,
-    ) { padding -> AriaNavHost(nav, Modifier.padding(padding), nowPlaying, queue, search, home, settings) }
+    ) { padding -> AriaNavHost(nav, start, Modifier.padding(padding), nowPlaying, queue, search, home, settings, onboarding) }
 }

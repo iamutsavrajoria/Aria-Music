@@ -20,6 +20,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import app.aria.music.ui.shell.AlbumRoute
 import app.aria.music.ui.shell.HomeRoute
 import app.aria.music.ui.shell.LibraryRoute
+import app.aria.music.ui.shell.OnboardingRoute
 import app.aria.music.ui.shell.SearchRoute
 import app.aria.music.ui.shell.navigateTopLevel
 import androidx.compose.material3.Text
@@ -125,5 +126,32 @@ class ShellTest {
         rule.onNodeWithText("ALBUM_PAGE").assertIsDisplayed()
         rule.runOnUiThread { nav.popBackStack() }
         rule.onNodeWithText("count=2").assertIsDisplayed()
+    }
+
+    @Test fun tabSwitchingAfterFirstRunOnboardingKeepsAFlatBackStack() {
+        lateinit var nav: NavHostController
+        rule.setContent {
+            AriaTestTheme {
+                nav = rememberNavController()
+                NavHost(nav, startDestination = OnboardingRoute) {
+                    composable<OnboardingRoute> { Text("ONBOARDING_PAGE") }
+                    composable<HomeRoute> { Text("HOME_PAGE") }
+                    composable<SearchRoute> { Text("SEARCH_PAGE") }
+                    composable<LibraryRoute> { Text("LIBRARY_PAGE") }
+                }
+            }
+        }
+        rule.onNodeWithText("ONBOARDING_PAGE").assertIsDisplayed()
+        rule.runOnUiThread { nav.navigate(HomeRoute) { popUpTo<OnboardingRoute> { inclusive = true } } }
+        rule.onNodeWithText("HOME_PAGE").assertIsDisplayed()
+        rule.runOnUiThread {
+            nav.navigateTopLevel(TopLevel.SEARCH); nav.navigateTopLevel(TopLevel.HOME); nav.navigateTopLevel(TopLevel.LIBRARY); nav.navigateTopLevel(TopLevel.SEARCH)
+        }
+        rule.onNodeWithText("SEARCH_PAGE").assertIsDisplayed()
+        rule.runOnUiThread {
+            val screens = nav.currentBackStack.value.map { it.destination }.filter { it !is androidx.navigation.NavGraph }
+            assertEquals(2, screens.size)
+            assertTrue(screens[0].hasRoute(HomeRoute::class) && screens[1].hasRoute(SearchRoute::class))
+        }
     }
 }

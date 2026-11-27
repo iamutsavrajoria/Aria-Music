@@ -12,6 +12,7 @@ import app.aria.music.ui.detail.ArtistScreen
 import app.aria.music.ui.detail.PlaylistScreen
 import app.aria.music.ui.home.HomeScreen
 import app.aria.music.ui.library.LibraryScreen
+import app.aria.music.ui.onboarding.OnboardingScreen
 import app.aria.music.ui.playlists.LocalPlaylistScreen
 import app.aria.music.ui.nowplaying.NowPlayingScreen
 import app.aria.music.ui.queue.QueueScreen
@@ -21,6 +22,7 @@ import app.aria.music.ui.settings.SettingsScreen
 @Composable
 fun AriaNavHost(
     nav: NavHostController,
+    start: Any,
     modifier: Modifier = Modifier,
     /** Overridable so tests without a Hilt activity can swap out the Hilt-backed screen. */
     nowPlaying: @Composable (onBack: () -> Unit, onOpenQueue: () -> Unit) -> Unit = { back, queue -> NowPlayingScreen(back, queue) },
@@ -30,8 +32,10 @@ fun AriaNavHost(
     home: @Composable (onAlbum: (String) -> Unit, onArtist: (String) -> Unit, onPlaylist: (String) -> Unit, onSettings: () -> Unit) -> Unit =
         { album, artist, playlist, settings -> HomeScreen(album, artist, playlist, settings) },
     settings: @Composable (onBack: () -> Unit) -> Unit = { back -> SettingsScreen(back) },
+    onboarding: @Composable (onDone: () -> Unit) -> Unit = { done -> OnboardingScreen(done) },
 ) {
-    NavHost(nav, startDestination = HomeRoute, modifier = modifier) {
+    NavHost(nav, startDestination = start, modifier = modifier) {
+        composable<OnboardingRoute> { onboarding { nav.navigate(HomeRoute) { popUpTo<OnboardingRoute> { inclusive = true } } } }
         composable<HomeRoute> {
             home(
                 { nav.navigate(AlbumRoute(it)) { launchSingleTop = true } },

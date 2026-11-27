@@ -25,6 +25,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -127,6 +128,8 @@ private fun HistoryRow(seconds: Int, onChange: (Int) -> Unit) {
     val title = stringResource(R.string.settings_history_title)
     // The thumb follows the finger at once; a write that is slow or normalized differently catches up when the stored value changes.
     var drag by remember(seconds) { mutableFloatStateOf(seconds.toFloat()) }
+    // Compared with the last value sent, not the stored one: the store lags the thumb, so dragging back to the stored value must still be sent.
+    var lastSent by remember(seconds) { mutableIntStateOf(seconds) }
     val shown = snap(drag)
     val valueText = pluralStringResource(R.plurals.settings_history_value, shown, shown)
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -136,7 +139,7 @@ private fun HistoryRow(seconds: Int, onChange: (Int) -> Unit) {
         }
         Slider(
             value = drag,
-            onValueChange = { raw -> drag = raw; val next = snap(raw); if (next != seconds) onChange(next) },
+            onValueChange = { raw -> drag = raw; val next = snap(raw); if (next != lastSent) { lastSent = next; onChange(next) } },
             // The semantics node is outside the sizing so its bounds are the 48dp target (the slider itself measures 44dp) and merges the slider into one node.
             modifier = Modifier.testTag(TAG_SETTINGS_HISTORY)
                 .semantics(mergeDescendants = true) { contentDescription = title; stateDescription = valueText }

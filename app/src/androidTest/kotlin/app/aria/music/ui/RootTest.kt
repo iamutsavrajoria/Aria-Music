@@ -7,6 +7,7 @@ import androidx.compose.material3.Text
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.platform.app.InstrumentationRegistry
@@ -39,7 +40,7 @@ class RootTest {
     // The snackbar times out on the test clock, so the clock is stepped by hand instead of letting idle-waiting run it past the timeout.
     @Test fun anEngineEventShowsAsASnackbar() {
         rule.mainClock.autoAdvance = false
-        rule.setContent { AriaTestTheme { AriaRoot(controller = controller, miniPlayer = {}, home = NO_HOME) } }
+        rule.setContent { AriaTestTheme { AriaRoot(controller = controller, onboardingDone = true, miniPlayer = {}, home = NO_HOME) } }
         engine.mutableEvents.tryEmit(skipped("Zed", "unavailable"))
         rule.mainClock.advanceTimeBy(1_500)
         rule.onNodeWithText(target.getString(R.string.msg_skipped_unavailable, "Zed")).assertIsDisplayed()
@@ -47,7 +48,7 @@ class RootTest {
 
     @Test fun aNewerMessageReplacesTheOneOnScreenEvenWhenBothArriveAtOnce() {
         rule.mainClock.autoAdvance = false
-        rule.setContent { AriaTestTheme { AriaRoot(controller = controller, miniPlayer = {}, home = NO_HOME) } }
+        rule.setContent { AriaTestTheme { AriaRoot(controller = controller, onboardingDone = true, miniPlayer = {}, home = NO_HOME) } }
         engine.mutableEvents.tryEmit(skipped("Old", "unavailable")); engine.mutableEvents.tryEmit(skipped("New", "network error"))
         rule.mainClock.advanceTimeBy(1_500)
         rule.onNodeWithText(target.getString(R.string.msg_skipped_network, "New")).assertIsDisplayed()
@@ -56,7 +57,7 @@ class RootTest {
 
     @Test fun aNewerMessageReplacesOneAlreadyOnScreen() {
         rule.mainClock.autoAdvance = false
-        rule.setContent { AriaTestTheme { AriaRoot(controller = controller, miniPlayer = {}, home = NO_HOME) } }
+        rule.setContent { AriaTestTheme { AriaRoot(controller = controller, onboardingDone = true, miniPlayer = {}, home = NO_HOME) } }
         engine.mutableEvents.tryEmit(skipped("Old", "unavailable")); rule.mainClock.advanceTimeBy(1_000)
         rule.onNodeWithText(target.getString(R.string.msg_skipped_unavailable, "Old")).assertIsDisplayed()
         engine.mutableEvents.tryEmit(skipped("New", "network error")); rule.mainClock.advanceTimeBy(1_500)
@@ -68,7 +69,7 @@ class RootTest {
         rule.setContent {
             AriaTestTheme {
                 AriaRoot(
-                    controller = controller, home = NO_HOME,
+                    controller = controller, onboardingDone = true, home = NO_HOME,
                     miniPlayer = { onExpand -> Text("MINI", Modifier.clickable(onClick = onExpand)) },
                     nowPlaying = { onBack, _ -> Text("NOWPLAYING", Modifier.clickable(onClick = onBack)) },
                 )
@@ -87,7 +88,7 @@ class RootTest {
         rule.setContent {
             AriaTestTheme {
                 AriaRoot(
-                    controller = controller, home = NO_HOME,
+                    controller = controller, onboardingDone = true, home = NO_HOME,
                     miniPlayer = { onExpand -> Text("MINI", Modifier.clickable(onClick = onExpand)) },
                     nowPlaying = { _, onQueue -> Text("NOWPLAYING", Modifier.clickable(onClick = onQueue)) },
                     queue = { onBack -> Text("QUEUE", Modifier.clickable(onClick = onBack)) },
@@ -115,7 +116,7 @@ class RootTest {
         rule.setContent {
             AriaTestTheme {
                 AriaRoot(
-                    controller = controller,
+                    controller = controller, onboardingDone = true,
                     miniPlayer = { Text("MINI") },
                     home = { _, _, _, onSettings -> Text("HOME", Modifier.clickable(onClick = onSettings)) },
                     settings = { onBack -> Text("SETTINGS", Modifier.clickable(onClick = onBack)) },
@@ -129,5 +130,46 @@ class RootTest {
         rule.onNodeWithText("SETTINGS").performClick()        // back
         rule.onNodeWithText("HOME").assertIsDisplayed()
         rule.onNodeWithText("MINI").assertIsDisplayed()
+    }
+
+    @Test fun nothingIsShownWhileTheOnboardingFlagIsStillLoading() {
+        rule.setContent {
+            AriaTestTheme {
+                AriaRoot(
+                    controller = controller, onboardingDone = null, miniPlayer = { Text("MINI") },
+                    home = { _, _, _, _ -> Text("HOME") }, onboarding = { Text("ONBOARDING") },
+                )
+            }
+        }
+        rule.onNodeWithText("HOME").assertDoesNotExist(); rule.onNodeWithText("ONBOARDING").assertDoesNotExist(); rule.onNodeWithText("MINI").assertDoesNotExist()
+    }
+
+    @Test fun aFirstRunOpensOnboardingFullScreenAndFinishingLandsOnHome() {
+        rule.setContent {
+            AriaTestTheme {
+                AriaRoot(
+                    controller = controller, onboardingDone = false, miniPlayer = { Text("MINI") },
+                    home = { _, _, _, _ -> Text("HOME") },
+                    onboarding = { onDone -> Text("ONBOARDING", Modifier.clickable(onClick = onDone)) },
+                )
+            }
+        }
+        rule.onNodeWithText("ONBOARDING").assertIsDisplayed()
+        rule.onNodeWithText("HOME").assertDoesNotExist()
+        rule.onNodeWithText("MINI").assertDoesNotExist()
+        rule.onNodeWithTag("tab:HOME").assertDoesNotExist()
+        rule.onNodeWithText("ONBOARDING").performClick()
+        rule.onNodeWithText("HOME").assertIsDisplayed()
+        rule.onNodeWithText("ONBOARDING").assertDoesNotExist()
+        rule.onNodeWithText("MINI").assertIsDisplayed()
+    }
+
+    @Test fun aReturningUserOpensHomeDirectly() {
+        rule.setContent {
+            AriaTestTheme {
+                AriaRoot(controller = controller, onboardingDone = true, miniPlayer = {}, home = { _, _, _, _ -> Text("HOME") }, onboarding = { Text("ONBOARDING") })
+            }
+        }
+        rule.onNodeWithText("HOME").assertIsDisplayed(); rule.onNodeWithText("ONBOARDING").assertDoesNotExist()
     }
 }

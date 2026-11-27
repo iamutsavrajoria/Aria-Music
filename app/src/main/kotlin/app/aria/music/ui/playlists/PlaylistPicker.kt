@@ -13,6 +13,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -44,22 +45,26 @@ fun AddToPlaylistDialog(track: Track, onDismiss: () -> Unit, viewModel: Playlist
     var failed by rememberSaveable { mutableStateOf(false) }
     var naming by rememberSaveable { mutableStateOf(false) }
 
-    fun run(name: String, block: suspend () -> PlaylistPickerViewModel.Outcome) {
+    // A closed dialog must not leave a half-created playlist for the next one to reuse.
+    DisposableEffect(viewModel) { onDispose { viewModel.dismissed() } }
+
+    /** [onSettled] runs when the add had an outcome other than Busy (a Busy tap changed nothing, so whatever the person typed stays on screen). */
+    fun run(name: String, onSettled: () -> Unit = {}, block: suspend () -> PlaylistPickerViewModel.Outcome) {
         scope.launch {
             try {
                 when (block()) {
-                    is PlaylistPickerViewModel.Outcome.Added -> { added = name; failed = false }
+                    is PlaylistPickerViewModel.Outcome.Added -> { added = name; failed = false; onSettled() }
                     PlaylistPickerViewModel.Outcome.Busy -> Unit
-                    PlaylistPickerViewModel.Outcome.BlankName -> failed = true
+                    PlaylistPickerViewModel.Outcome.BlankName -> { failed = true; onSettled() }
                 }
-            } catch (e: CancellationException) { throw e } catch (e: Exception) { failed = true }
+            } catch (e: CancellationException) { throw e } catch (e: Exception) { failed = true; onSettled() }
         }
     }
 
-    if (naming) {
+    if (naming && added == null) {
         NameDialog(R.string.playlist_name_title_new, "", onConfirm = { raw ->
-            naming = false
-            run(PlaylistNames.clean(raw).orEmpty()) { viewModel.createAndAdd(raw, track) }
+            // Stays open until the add settles: if another add is in flight the tap is ignored and the typed name is not lost.
+            run(PlaylistNames.clean(raw).orEmpty(), onSettled = { naming = false }) { viewModel.createAndAdd(raw, track) }
         }, onDismiss = { naming = false })
         return
     }

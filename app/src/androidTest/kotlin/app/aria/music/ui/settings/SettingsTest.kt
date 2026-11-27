@@ -66,6 +66,15 @@ class SettingsTest {
         assertEquals(listOf("history:45"), log)
     }
 
+    @Test fun draggingBackToTheStoredValueIsStillSentWhileTheStoreHasNotCaughtUp() {
+        // The stored value stays 30 throughout (nothing here writes it), as it would while a write is slow.
+        show(SettingsUiState.Content(AppSettings(historyThresholdMs = 30_000)))
+        node(TAG_SETTINGS_HISTORY).performSemanticsAction(SemanticsActions.SetProgress) { it(45f) }
+        node(TAG_SETTINGS_HISTORY).performSemanticsAction(SemanticsActions.SetProgress) { it(30f) }
+        node(TAG_SETTINGS_HISTORY).performSemanticsAction(SemanticsActions.SetProgress) { it(30f) }
+        assertEquals(listOf("history:45", "history:30"), log)
+    }
+
     @Test fun sleepDefaultMenuOffersTheChoices() {
         show(); node(TAG_SETTINGS_SLEEP).assertTextContains(plural(R.plurals.np_sleep_in_minutes, 15), substring = true).performClick()
         for (m in listOf(5, 10, 30, 45, 60, 90)) rule.onNodeWithText(plural(R.plurals.np_sleep_in_minutes, m)).assertExists()
