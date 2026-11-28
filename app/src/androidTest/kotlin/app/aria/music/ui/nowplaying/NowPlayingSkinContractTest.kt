@@ -23,11 +23,10 @@ typealias Skin = @Composable (NowPlayingUiState, () -> Long, NowPlayingActions, 
 @RunWith(Parameterized::class)
 class NowPlayingSkinContractTest(private val name: String, private val skin: Skin) {
     companion object {
+        private val material: Skin = { s, p, a, m -> NowPlayingContent(s, p, a, m) }
+        private val apple: Skin = { s, p, a, m -> AppleNowPlayingContent(s, p, a, m) }
         @JvmStatic @Parameterized.Parameters(name = "{0}")
-        fun skins(): List<Array<Any>> = listOf(
-            arrayOf("material", { s: NowPlayingUiState, p: () -> Long, a: NowPlayingActions, m: Modifier -> NowPlayingContent(s, p, a, m) } as Skin),
-            arrayOf("apple", { s: NowPlayingUiState, p: () -> Long, a: NowPlayingActions, m: Modifier -> AppleNowPlayingContent(s, p, a, m) } as Skin),
-        )
+        fun skins(): List<Array<Any>> = listOf(arrayOf("material", material), arrayOf("apple", apple))
     }
 
     @get:Rule val rule = createComposeRule()
