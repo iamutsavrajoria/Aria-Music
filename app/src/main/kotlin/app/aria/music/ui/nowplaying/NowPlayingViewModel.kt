@@ -4,6 +4,7 @@ package app.aria.music.ui.nowplaying
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.aria.domain.LibraryRepository
+import app.aria.domain.NowPlayingSkin
 import app.aria.domain.SettingsRepository
 import app.aria.music.player.PlayerController
 import app.aria.music.player.PlayerMessage
@@ -26,7 +27,7 @@ import javax.inject.Inject
 class NowPlayingViewModel @Inject constructor(
     private val controller: PlayerController,
     private val library: LibraryRepository,
-    settings: SettingsRepository,
+    private val settings: SettingsRepository,
 ) : ViewModel() {
     @OptIn(ExperimentalCoroutinesApi::class)
     private val liked: Flow<Boolean> = controller.ui.map { it.current?.track?.id }.distinctUntilChanged()
@@ -39,6 +40,9 @@ class NowPlayingViewModel @Inject constructor(
         if (item == null) NowPlayingUiState.Empty
         else NowPlayingUiState.Content(item.track, ui.status, if (ui.durationMs > 0) ui.durationMs else item.track.durationMs ?: 0L, ui.shuffle, ui.repeat, ui.sleepTimer, liked, ui.queue.size, ui.currentIndex, sleepDefault)
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NowPlayingUiState.Empty)
+
+    val skin: StateFlow<NowPlayingSkin> = settings.settings.map { it.nowPlayingSkin }.distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NowPlayingSkin.MATERIAL)
 
     /** Read only by the seek bar and its time labels, so a tick never recomposes anything else. */
     val positionMs: StateFlow<Long> = controller.positionMs

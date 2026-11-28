@@ -8,6 +8,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.aria.domain.NowPlayingSkin
 
 const val TAG_NP_PLAY = "np:play"
 const val TAG_NP_SEEK = "np:seek"
@@ -24,7 +25,11 @@ fun NowPlayingScreen(onBack: () -> Unit, onOpenQueue: () -> Unit, viewModel: Now
     // Only the seek bar invokes this lambda, so a position tick never recomposes the screen itself.
     val position = viewModel.positionMs.collectAsStateWithLifecycle()
     val actions = remember(viewModel, onBack, onOpenQueue) { viewModel.actions(onBack, onOpenQueue) }
-    NowPlayingContent(state, { position.value }, actions)
+    val skin by viewModel.skin.collectAsStateWithLifecycle()
+    when (skin) {
+        NowPlayingSkin.MATERIAL -> NowPlayingContent(state, { position.value }, actions)
+        NowPlayingSkin.APPLE -> AppleNowPlayingContent(state, { position.value }, actions)
+    }
 }
 
 /** Reserved for synced lyrics; filled by sub-project 4. Intentionally empty. */

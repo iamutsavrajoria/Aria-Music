@@ -2,6 +2,8 @@
 package app.aria.data
 
 import app.aria.domain.AppSettings
+import app.aria.domain.NowPlayingSkin
+import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -105,5 +107,19 @@ class DataStoreSettingsRepositoryTest {
         val seen = withTimeout(10_000) { repo.settings.take(2).toList() }
         assertEquals(AppSettings(), seen[0]); assertEquals(60_000L, seen[1].historyThresholdMs)
         repo.update { it.copy(endlessRadio = false) } // a failed write must not throw
+    }
+
+    @Test fun skinPersistsAndUnknownValuesFallBack() = runBlocking {
+        val file = tmp.newFile("g.preferences_pb").also { it.delete() }
+        val s1 = CoroutineScope(Job() + Dispatchers.IO)
+        try { open(file, s1).update { it.copy(nowPlayingSkin = NowPlayingSkin.APPLE) } } finally { s1.cancel() }
+        s1.coroutineContext[Job]!!.join()
+        val s2 = CoroutineScope(Job() + Dispatchers.IO)
+        try {
+            val store = createSettingsDataStore(file, s2)
+            assertEquals(NowPlayingSkin.APPLE, DataStoreSettingsRepository(store).settings.first().nowPlayingSkin)
+            store.edit { it[stringPreferencesKey("now_playing_skin")] = "HOLOGRAM" }
+            assertEquals(NowPlayingSkin.MATERIAL, DataStoreSettingsRepository(store).settings.first().nowPlayingSkin)
+        } finally { s2.cancel() }
     }
 }

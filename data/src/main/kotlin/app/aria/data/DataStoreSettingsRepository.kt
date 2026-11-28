@@ -10,7 +10,9 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
 import app.aria.domain.AppSettings
+import app.aria.domain.NowPlayingSkin
 import app.aria.domain.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
@@ -46,6 +48,7 @@ class DataStoreSettingsRepository(private val store: DataStore<Preferences>) : S
         val normalizeLoudness = booleanPreferencesKey("normalize_loudness")
         val sleepDefaultMinutes = intPreferencesKey("sleep_default_minutes")
         val onboardingDone = booleanPreferencesKey("onboarding_done")
+        val nowPlayingSkin = stringPreferencesKey("now_playing_skin")
     }
 
     /** A read failure emits defaults and then retries, so the flow never completes because of an IOException. */
@@ -70,6 +73,7 @@ class DataStoreSettingsRepository(private val store: DataStore<Preferences>) : S
             p[Keys.normalizeLoudness] = next.normalizeLoudness
             p[Keys.sleepDefaultMinutes] = next.sleepTimerDefaultMinutes
             p[Keys.onboardingDone] = next.onboardingDone
+            p[Keys.nowPlayingSkin] = next.nowPlayingSkin.name
         }
     }
 
@@ -82,6 +86,8 @@ class DataStoreSettingsRepository(private val store: DataStore<Preferences>) : S
             normalizeLoudness = this[Keys.normalizeLoudness] ?: d.normalizeLoudness,
             sleepTimerDefaultMinutes = this[Keys.sleepDefaultMinutes] ?: d.sleepTimerDefaultMinutes,
             onboardingDone = this[Keys.onboardingDone] ?: d.onboardingDone,
+            // An unknown stored value (a newer or damaged file) falls back to the default skin.
+            nowPlayingSkin = NowPlayingSkin.entries.firstOrNull { it.name == this[Keys.nowPlayingSkin] } ?: d.nowPlayingSkin,
         ).normalized()
     }
 }

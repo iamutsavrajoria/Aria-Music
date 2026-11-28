@@ -12,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
@@ -19,6 +21,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -43,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.aria.domain.AppSettings
+import app.aria.domain.NowPlayingSkin
 import app.aria.music.BuildConfig
 import app.aria.music.R
 import app.aria.music.ui.common.AriaIcons
@@ -55,6 +59,7 @@ const val TAG_SETTINGS_RADIO = "settings:radio"
 const val TAG_SETTINGS_SILENCE = "settings:silence"
 const val TAG_SETTINGS_LOUDNESS = "settings:loudness"
 const val TAG_SETTINGS_SLEEP = "settings:sleep"
+const val TAG_SETTINGS_SKIN = "settings:skin"
 const val TAG_SETTINGS_ABOUT = "settings:about"
 
 data class SettingsActions(
@@ -64,6 +69,7 @@ data class SettingsActions(
     val onSkipSilence: (Boolean) -> Unit,
     val onNormalize: (Boolean) -> Unit,
     val onSleepDefault: (Int) -> Unit,
+    val onSkin: (NowPlayingSkin) -> Unit,
 )
 
 @Composable
@@ -86,6 +92,8 @@ private fun SettingsBody(s: AppSettings, versionName: String, brandName: String,
         SwitchRow(TAG_SETTINGS_SILENCE, R.string.settings_silence, null, s.skipSilence, actions.onSkipSilence)
         SwitchRow(TAG_SETTINGS_LOUDNESS, R.string.settings_loudness, null, s.normalizeLoudness, actions.onNormalize)
         SleepRow(s.sleepTimerDefaultMinutes, actions.onSleepDefault)
+        SectionHeader(R.string.settings_skin_title)
+        SkinSelector(s.nowPlayingSkin, actions.onSkin)
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
         SectionHeader(R.string.settings_about)
         Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag(TAG_SETTINGS_ABOUT), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -180,13 +188,33 @@ private fun SleepRow(minutes: Int, onChange: (Int) -> Unit) {
     }
 }
 
+/** Two radio rows in one selectable group: the whole row is the control (label and state read together), the radio is only the picture. */
+@Composable
+private fun SkinSelector(selected: NowPlayingSkin, onSelect: (NowPlayingSkin) -> Unit) {
+    Column(Modifier.fillMaxWidth().selectableGroup().testTag(TAG_SETTINGS_SKIN)) {
+        for ((skin, label) in listOf(NowPlayingSkin.MATERIAL to R.string.settings_skin_material, NowPlayingSkin.APPLE to R.string.settings_skin_apple)) {
+            val isSelected = skin == selected
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                    .selectable(selected = isSelected, role = Role.RadioButton, onClick = { onSelect(skin) })
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                RadioButton(selected = isSelected, onClick = null)
+                Text(stringResource(label), Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+            }
+        }
+    }
+}
+
 @Composable
 fun SettingsScreen(onBack: () -> Unit, viewModel: SettingsViewModel = hiltViewModel()) {
     val state = viewModel.state.collectAsStateWithLifecycle().value
     val actions = remember(viewModel, onBack) {
         SettingsActions(
             onBack = onBack, onHistorySeconds = viewModel::setHistorySeconds, onEndlessRadio = viewModel::setEndlessRadio,
-            onSkipSilence = viewModel::setSkipSilence, onNormalize = viewModel::setNormalizeLoudness, onSleepDefault = viewModel::setSleepDefaultMinutes,
+            onSkipSilence = viewModel::setSkipSilence, onNormalize = viewModel::setNormalizeLoudness, onSleepDefault = viewModel::setSleepDefaultMinutes, onSkin = viewModel::setNowPlayingSkin,
         )
     }
     SettingsContent(state, BuildConfig.VERSION_NAME, BuildConfig.BRAND_NAME, actions)

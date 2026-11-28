@@ -3,6 +3,9 @@ package app.aria.domain
 
 import kotlinx.coroutines.flow.Flow
 
+/** Which Now Playing layout is shown. Both skins share one state and one set of actions. */
+enum class NowPlayingSkin { MATERIAL, APPLE }
+
 data class AppSettings(
     val historyThresholdMs: Long = DEFAULT_HISTORY_THRESHOLD_MS,
     val endlessRadio: Boolean = true,
@@ -10,6 +13,7 @@ data class AppSettings(
     val normalizeLoudness: Boolean = true,
     val sleepTimerDefaultMinutes: Int = 15,
     val onboardingDone: Boolean = false,
+    val nowPlayingSkin: NowPlayingSkin = NowPlayingSkin.MATERIAL,
 ) {
     fun normalized(): AppSettings = copy(
         historyThresholdMs = historyThresholdMs.coerceIn(MIN_HISTORY_THRESHOLD_MS, MAX_HISTORY_THRESHOLD_MS),

@@ -144,4 +144,11 @@ class NowPlayingViewModelTest {
         e.engine.mutableState.value = e.engine.mutableState.value.copy(durationMs = 0L, queue = listOf(QueueItem(1L, Samples.track(1).copy(durationMs = null)))); runCurrent()
         assertEquals(0L, (e.vm.state.value as NowPlayingUiState.Content).durationMs)
     }
+
+    @Test fun skinFollowsTheSetting() = runTest {
+        val e = Env(backgroundScope); backgroundScope.launch { e.vm.skin.collect { } }
+        assertEquals(NowPlayingSkin.MATERIAL, e.vm.skin.value)
+        e.settings.update { it.copy(nowPlayingSkin = NowPlayingSkin.APPLE) }
+        assertEquals(NowPlayingSkin.APPLE, e.vm.skin.value)
+    }
 }

@@ -2,6 +2,7 @@
 package app.aria.music.ui.settings
 
 import app.aria.domain.AppSettings
+import app.aria.domain.NowPlayingSkin
 import app.aria.domain.testing.FakeSettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -69,5 +70,12 @@ class SettingsViewModelTest {
     @Test fun theChoicesAreWhatTheScreenOffers() {
         assertEquals(listOf(5, 10, 15, 30, 45, 60, 90), SettingsChoices.SLEEP_MINUTES)
         assertEquals(10, SettingsChoices.HISTORY_MIN_S); assertEquals(120, SettingsChoices.HISTORY_MAX_S); assertEquals(5, SettingsChoices.HISTORY_STEP_S)
+    }
+
+    @Test fun skinIsPersistedAndChangesOnlyItself() = runTest(dispatcher) {
+        val (repo, vm) = env(backgroundScope, AppSettings(endlessRadio = false, onboardingDone = true))
+        val before = repo.current
+        vm.setNowPlayingSkin(NowPlayingSkin.APPLE)
+        assertEquals(before.copy(nowPlayingSkin = NowPlayingSkin.APPLE), repo.current)
     }
 }

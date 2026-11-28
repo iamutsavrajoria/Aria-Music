@@ -4,6 +4,7 @@ package app.aria.music.ui.settings
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.aria.domain.AppSettings
+import app.aria.domain.NowPlayingSkin
 import app.aria.domain.SettingsRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
@@ -41,4 +42,5 @@ class SettingsViewModel @Inject constructor(private val repo: SettingsRepository
     fun setSkipSilence(on: Boolean) = edit { it.copy(skipSilence = on) }
     fun setNormalizeLoudness(on: Boolean) = edit { it.copy(normalizeLoudness = on) }
     fun setSleepDefaultMinutes(minutes: Int) = edit { it.copy(sleepTimerDefaultMinutes = minutes) }
+    fun setNowPlayingSkin(skin: NowPlayingSkin) = edit { it.copy(nowPlayingSkin = skin) }
 }

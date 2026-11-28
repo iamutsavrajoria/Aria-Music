@@ -8,6 +8,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.unit.dp
 import androidx.test.platform.app.InstrumentationRegistry
 import app.aria.domain.AppSettings
+import app.aria.domain.NowPlayingSkin
 import app.aria.music.R
 import app.aria.music.ui.AriaTestTheme
 import org.junit.Assert.assertEquals
@@ -20,7 +21,7 @@ class SettingsTest {
     private fun str(id: Int, vararg a: Any) = target.getString(id, *a)
     private fun plural(id: Int, n: Int) = target.resources.getQuantityString(id, n, n)
     private val log = mutableListOf<String>()
-    private val actions = SettingsActions({ log += "back" }, { log += "history:$it" }, { log += "radio:$it" }, { log += "silence:$it" }, { log += "loudness:$it" }, { log += "sleep:$it" })
+    private val actions = SettingsActions({ log += "back" }, { log += "history:$it" }, { log += "radio:$it" }, { log += "silence:$it" }, { log += "loudness:$it" }, { log += "sleep:$it" }, { log += "skin:$it" })
 
     /** One setContent per test (a second one in the same rule would replace the first). */
     private fun show(s: SettingsUiState = SettingsUiState.Content(AppSettings()), pseudo: Boolean = false, fontScale: Float = 1f) {
@@ -80,6 +81,20 @@ class SettingsTest {
         for (m in listOf(5, 10, 30, 45, 60, 90)) rule.onNodeWithText(plural(R.plurals.np_sleep_in_minutes, m)).assertExists()
         rule.onNodeWithText(plural(R.plurals.np_sleep_in_minutes, 45)).performClick()
         assertEquals(listOf("sleep:45"), log)
+    }
+
+    @Test fun skinSelectorOffersBothStyles() {
+        show(); node(TAG_SETTINGS_SKIN)
+        val material = rule.onNodeWithText(str(R.string.settings_skin_material)); val apple = rule.onNodeWithText(str(R.string.settings_skin_apple))
+        material.assertIsSelected().assertHeightIsAtLeast(48.dp)
+        apple.assertIsNotSelected().assertHeightIsAtLeast(48.dp).assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, androidx.compose.ui.semantics.Role.RadioButton)).performClick()
+        assertEquals(listOf("skin:APPLE"), log)
+    }
+
+    @Test fun skinSelectorShowsTheStoredStyle() {
+        show(SettingsUiState.Content(AppSettings(nowPlayingSkin = NowPlayingSkin.APPLE))); node(TAG_SETTINGS_SKIN)
+        rule.onNodeWithText(str(R.string.settings_skin_apple)).assertIsSelected()
+        rule.onNodeWithText(str(R.string.settings_skin_material)).assertIsNotSelected()
     }
 
     @Test fun aboutShowsNonAffiliationAndNoAnalytics() {
