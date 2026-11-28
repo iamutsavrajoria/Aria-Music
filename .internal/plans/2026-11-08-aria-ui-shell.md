@@ -6507,3 +6507,8 @@ Task 21 closed (CI green at 5f00217). Spec ✅; all seven Task 20 carry-overs ve
 
 ### Controller note — Task 22 review (onboarding)
 Task 22 closed after one fix round (CI green at 06c7953): double-finish guard + launchSingleTop, onboarding BackHandler, picker `created` no longer cleared on rotation (epoch guard), retry only when the playlist is gone, saveable notification page, NonCancellable flag write. Deferred to Task 24: F6 (settings read failure shows onboarding to a returning user), F8 (permanently-denied Allow gives no feedback; counter announced on first composition), privacy page wording should name the YouTube image hosts in plain words, dialog-level Hilt-free UI test for Busy.
+
+### Controller note — Task 23 review (Apple-style skin)
+Task 23 closed (CI green at 4d8fea6; shared SeekBar semantics node now covers 48dp in both skins). Spec ✅, quality good.
+**Task 24 MUST also do:** (1) NowPlayingViewModel.skin initial value must not flash Material for an Apple user (nullable/Loading marker, render surface only until known) + VM test; (2) seek drag-commit / clamp / disabled-without-duration tests added to the parameterised skin contract test, plus a screen-level test that NowPlayingScreen picks the skin from the VM; (3) rename the user-visible "Apple-style" string to a neutral name (e.g. "Rounded") — trademark/non-affiliation policy (keep the enum name internal or rename); (4) add a screenshot review of the glass panel (light/dark, API 31+ and fallback) to the device checklist.
+**Deferred polish:** seek bar time labels read twice (clearAndSetSemantics); stronger large-font assertions on SecondaryControls.
