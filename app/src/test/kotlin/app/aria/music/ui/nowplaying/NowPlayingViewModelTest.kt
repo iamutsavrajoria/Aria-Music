@@ -146,9 +146,9 @@ class NowPlayingViewModelTest {
     }
 
     @Test fun skinFollowsTheSetting() = runTest {
-        val e = Env(backgroundScope); backgroundScope.launch { e.vm.skin.collect { } }
+        val e = Env(backgroundScope); backgroundScope.launch { e.vm.skin.collect { } }; runCurrent()
         assertEquals(NowPlayingSkin.MATERIAL, e.vm.skin.value)
-        e.settings.update { it.copy(nowPlayingSkin = NowPlayingSkin.APPLE) }
+        e.settings.update { it.copy(nowPlayingSkin = NowPlayingSkin.APPLE) }; runCurrent()
         assertEquals(NowPlayingSkin.APPLE, e.vm.skin.value)
     }
 }
