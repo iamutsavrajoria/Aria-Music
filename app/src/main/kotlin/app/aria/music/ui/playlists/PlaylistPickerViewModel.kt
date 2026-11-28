@@ -14,6 +14,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.sync.Mutex
 
@@ -39,8 +40,11 @@ class PlaylistPickerViewModel @Inject constructor(private val repo: PlaylistRepo
     private data class Created(val name: String, val trackId: TrackId, val playlistId: String)
     private var created: Created? = null
 
-    /** The dialog went away: a later dialog (even for the same song and name) starts fresh. */
-    fun dismissed() { created = null }
+    /** Bumped by every dismissal: a create that was already running when the dialog went away must not leave a remembered playlist behind. */
+    private var epoch = 0
+
+    /** The person closed the dialog (Cancel, Done, tap outside): a later dialog (even for the same song and name) starts fresh. Not called on rotation, which keeps the dialog. */
+    fun dismissed() { epoch++; created = null }
 
     /** Failures throw (and leave nothing half-done that a retry would repeat). */
     suspend fun addTo(playlistId: String, track: Track): Outcome = exclusive {
@@ -50,13 +54,15 @@ class PlaylistPickerViewModel @Inject constructor(private val repo: PlaylistRepo
     suspend fun createAndAdd(name: String, track: Track): Outcome {
         val clean = PlaylistNames.clean(name) ?: return Outcome.BlankName
         return exclusive {
+            val startEpoch = epoch
+            suspend fun createRemembered(): String = repo.create(clean).also { if (epoch == startEpoch) created = Created(clean, track.id, it) }
             val reused = created?.takeIf { it.name == clean && it.trackId == track.id }?.playlistId
-            val id = when {
-                reused == null -> repo.create(clean).also { created = Created(clean, track.id, it) }
-                // The remembered playlist may have been deleted since the failed attempt: one retry with a fresh playlist.
-                else -> try { repo.addTracks(reused, listOf(track)); reused } catch (e: CancellationException) { throw e } catch (e: Exception) {
+            val id = if (reused == null) createRemembered() else {
+                try { repo.addTracks(reused, listOf(track)); reused } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                    // Only a playlist that no longer exists is replaced; a transient failure keeps it for the next retry (no orphan, no duplicate).
+                    if (repo.playlist(reused).first() != null) throw e
                     created = null
-                    repo.create(clean).also { created = Created(clean, track.id, it) }
+                    createRemembered()
                 }
             }
             if (id != reused) repo.addTracks(id, listOf(track))

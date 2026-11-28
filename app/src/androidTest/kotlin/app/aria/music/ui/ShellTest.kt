@@ -24,6 +24,7 @@ import app.aria.music.ui.shell.OnboardingRoute
 import app.aria.music.ui.shell.SearchRoute
 import app.aria.music.ui.shell.navigateTopLevel
 import androidx.compose.material3.Text
+import androidx.compose.foundation.clickable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.assertHeightIsAtLeast
@@ -152,6 +153,27 @@ class ShellTest {
             val screens = nav.currentBackStack.value.map { it.destination }.filter { it !is androidx.navigation.NavGraph }
             assertEquals(2, screens.size)
             assertTrue(screens[0].hasRoute(HomeRoute::class) && screens[1].hasRoute(SearchRoute::class))
+        }
+    }
+
+    @Test fun aDoubleFinishLeavesASingleHomeOnTheStack() {
+        lateinit var nav: NavHostController
+        rule.setContent {
+            AriaTestTheme {
+                nav = rememberNavController()
+                app.aria.music.ui.shell.AriaNavHost(
+                    nav, start = OnboardingRoute,
+                    home = { _, _, _, _ -> Text("HOME_PAGE") },
+                    onboarding = { done -> Text("ONBOARDING_PAGE", Modifier.clickable { done(); done() }) },
+                )
+            }
+        }
+        rule.onNodeWithText("ONBOARDING_PAGE").performClick()
+        rule.onNodeWithText("HOME_PAGE").assertIsDisplayed()
+        rule.runOnUiThread {
+            val screens = nav.currentBackStack.value.map { it.destination }.filter { it !is androidx.navigation.NavGraph }
+            assertEquals(1, screens.size)
+            assertTrue(screens[0].hasRoute(HomeRoute::class))
         }
     }
 }

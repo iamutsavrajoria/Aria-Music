@@ -15,7 +15,16 @@ class OnboardingTest {
     private fun str(id: Int, vararg a: Any) = androidx.test.platform.app.InstrumentationRegistry.getInstrumentation().targetContext.getString(id, *a)
     private val log = mutableListOf<String>()
     private val actions = OnboardingActions({ log += "finish" }, { log += "notify" })
-    private fun show(notify: Boolean = true, pseudo: Boolean = false, fontScale: Float = 1f) { log.clear(); rule.setContent { AriaTestTheme(pseudo, fontScale) { OnboardingContent(notify, actions) } } }
+    private var backDispatcher: androidx.activity.OnBackPressedDispatcher? = null
+    private fun show(notify: Boolean = true, pseudo: Boolean = false, fontScale: Float = 1f) {
+        log.clear()
+        rule.setContent {
+            backDispatcher = androidx.activity.compose.LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
+            AriaTestTheme(pseudo, fontScale) { OnboardingContent(notify, actions) }
+        }
+    }
+    private fun systemBack() = rule.runOnUiThread { backDispatcher!!.onBackPressed() }
+
 
     @Test fun walksThroughThreePagesAndFinishes() {
         show()
@@ -27,6 +36,13 @@ class OnboardingTest {
     @Test fun backReturnsToThePreviousPage() {
         show(); rule.onNodeWithTag(TAG_ONBOARDING_NEXT).performClick(); rule.onNodeWithTag(TAG_ONBOARDING_BACK).assertHeightIsAtLeast(48.dp).performClick()
         rule.onNodeWithText(str(R.string.onboarding_welcome_title)).assertIsDisplayed()
+    }
+    @Test fun systemBackStepsToThePreviousPage() {
+        show(); rule.onNodeWithTag(TAG_ONBOARDING_NEXT).performClick(); rule.onNodeWithTag(TAG_ONBOARDING_NEXT).performClick()
+        rule.onNodeWithText(str(R.string.onboarding_notifications_title)).assertIsDisplayed()
+        systemBack(); rule.onNodeWithText(str(R.string.onboarding_privacy_title)).assertIsDisplayed()
+        systemBack(); rule.onNodeWithText(str(R.string.onboarding_welcome_title)).assertIsDisplayed()
+        assertEquals(emptyList<String>(), log)
     }
     @Test fun backIsHiddenOnTheFirstPage() { show(); rule.onNodeWithTag(TAG_ONBOARDING_BACK).assertDoesNotExist() }
     @Test fun skipFinishesImmediately() { show(); rule.onNodeWithTag(TAG_ONBOARDING_SKIP).assertHeightIsAtLeast(48.dp).performClick(); assertEquals(listOf("finish"), log) }

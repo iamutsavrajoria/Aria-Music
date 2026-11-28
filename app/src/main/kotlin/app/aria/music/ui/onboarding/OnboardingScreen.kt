@@ -4,6 +4,7 @@ package app.aria.music.ui.onboarding
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +24,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -62,6 +64,8 @@ fun OnboardingContent(showNotificationPage: Boolean, actions: OnboardingActions,
     val page = pages[index]
     val last = index == pages.lastIndex
     val counter = stringResource(R.string.onboarding_page_of, index + 1, pages.size)
+    // System Back steps to the previous page; on the first page it leaves the app as usual.
+    BackHandler(enabled = index > 0) { requested = index - 1 }
     Column(modifier.fillMaxSize().padding(horizontal = 24.dp, vertical = 16.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -95,18 +99,26 @@ fun OnboardingContent(showNotificationPage: Boolean, actions: OnboardingActions,
     }
 }
 
+/** Runs [block] on the first call only, so a double tap on Get started or Skip navigates once. */
+internal fun once(block: () -> Unit): () -> Unit {
+    var done = false
+    return { if (!done) { done = true; block() } }
+}
+
 @Composable
 fun OnboardingScreen(onDone: () -> Unit, viewModel: OnboardingViewModel = hiltViewModel()) {
     val context = LocalContext.current
     // Decided once: granting on the Notifications page must not remove the page the person is looking at.
-    val showNotificationPage = remember {
+    val showNotificationPage = rememberSaveable {
         val granted = Build.VERSION.SDK_INT < 33 || context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         NotificationPermissionPolicy.shouldExplain(Build.VERSION.SDK_INT, granted, alreadyAsked = false, hasQueue = true)
     }
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
-    val actions = remember(viewModel, onDone, launcher) {
+    val currentDone by rememberUpdatedState(onDone)
+    val finish = remember(viewModel) { once { viewModel.finish(); currentDone() } }
+    val actions = remember(finish, launcher) {
         OnboardingActions(
-            onFinish = { viewModel.finish(); onDone() },
+            onFinish = finish,
             onRequestNotifications = { launcher.launch(Manifest.permission.POST_NOTIFICATIONS) },
         )
     }

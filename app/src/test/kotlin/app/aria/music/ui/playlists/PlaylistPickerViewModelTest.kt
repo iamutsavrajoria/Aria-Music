@@ -89,6 +89,34 @@ class PlaylistPickerViewModelTest {
         assertEquals(1, base.tracks(id).first().size)
     }
 
+    @Test fun aSecondTransientFailureKeepsTheRememberedPlaylistSoNothingIsOrphanedOrDuplicated() = runTest(dispatcher) {
+        val base = FakePlaylistRepository(); var fail = true
+        val repo = object : PlaylistRepository by base { override suspend fun addTracks(id: String, tracks: List<Track>) { if (fail) error("db"); base.addTracks(id, tracks) } }
+        val vm = PlaylistPickerViewModel(repo)
+        assertFailsWith<IllegalStateException> { vm.createAndAdd("Mix", Samples.track(1)) }
+        assertFailsWith<IllegalStateException> { vm.createAndAdd("Mix", Samples.track(1)) }
+        assertEquals(1, base.playlists("", LibrarySort.TITLE).first().size)
+        fail = false
+        val id = (vm.createAndAdd("Mix", Samples.track(1)) as PlaylistPickerViewModel.Outcome.Added).playlistId
+        assertEquals(listOf("Mix"), base.playlists("", LibrarySort.TITLE).first().map { it.title })
+        assertEquals(1, base.tracks(id).first().size)
+    }
+
+    @Test fun aCreateStillRunningWhenTheDialogIsDismissedLeavesNothingToReuse() = runTest(dispatcher) {
+        val base = FakePlaylistRepository(); val createGate = CompletableDeferred<Unit>(); val addGate = CompletableDeferred<Unit>(); var gated = true
+        val repo = object : PlaylistRepository by base {
+            override suspend fun create(name: String): String { if (gated) createGate.await(); return base.create(name) }
+            override suspend fun addTracks(id: String, tracks: List<Track>) { if (gated) addGate.await(); base.addTracks(id, tracks) }
+        }
+        val vm = PlaylistPickerViewModel(repo)
+        val first = async { vm.createAndAdd("Mix", Samples.track(1)) }
+        vm.dismissed()                       // the dialog is closed while the create is in flight
+        createGate.complete(Unit)            // the create finishes, then the add hangs and is cancelled with the dialog
+        first.cancel(); first.join(); gated = false
+        vm.createAndAdd("Mix", Samples.track(1))
+        assertEquals(2, base.playlists("", LibrarySort.TITLE).first().size)   // a fresh playlist, not the stale one
+    }
+
     @Test fun aTapWhileAnAddIsInFlightIsIgnored() = runTest(dispatcher) {
         val base = FakePlaylistRepository(); val id = base.create("Mix"); val gate = CompletableDeferred<Unit>(); var adds = 0
         val repo = object : PlaylistRepository by base { override suspend fun addTracks(id: String, tracks: List<Track>) { adds++; gate.await(); base.addTracks(id, tracks) } }

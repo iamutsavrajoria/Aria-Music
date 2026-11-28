@@ -13,7 +13,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -45,19 +44,15 @@ fun AddToPlaylistDialog(track: Track, onDismiss: () -> Unit, viewModel: Playlist
     var failed by rememberSaveable { mutableStateOf(false) }
     var naming by rememberSaveable { mutableStateOf(false) }
 
-    // A closed dialog must not leave a half-created playlist for the next one to reuse.
-    DisposableEffect(viewModel) { onDispose { viewModel.dismissed() } }
+    // A real dismissal (Cancel, Done, tap outside) must not leave a half-created playlist for the next dialog to reuse.
+    // Disposal is not used for this: a rotation disposes too, and would lose the playlist a retry has to reuse.
+    val dismiss = { viewModel.dismissed(); onDismiss() }
 
     /** [onSettled] runs when the add had an outcome other than Busy (a Busy tap changed nothing, so whatever the person typed stays on screen). */
     fun run(name: String, onSettled: () -> Unit = {}, block: suspend () -> PlaylistPickerViewModel.Outcome) {
         scope.launch {
-            try {
-                when (block()) {
-                    is PlaylistPickerViewModel.Outcome.Added -> { added = name; failed = false; onSettled() }
-                    PlaylistPickerViewModel.Outcome.Busy -> Unit
-                    PlaylistPickerViewModel.Outcome.BlankName -> { failed = true; onSettled() }
-                }
-            } catch (e: CancellationException) { throw e } catch (e: Exception) { failed = true; onSettled() }
+            val next = try { PickerState(added, failed).after(block(), name) } catch (e: CancellationException) { throw e } catch (e: Exception) { PickerState(added, failed = true) }
+            if (next != null) { added = next.added; failed = next.failed; onSettled() }
         }
     }
 
@@ -69,7 +64,7 @@ fun AddToPlaylistDialog(track: Track, onDismiss: () -> Unit, viewModel: Playlist
         return
     }
     AlertDialog(
-        onDismissRequest = onDismiss,
+        onDismissRequest = dismiss,
         title = { Text(stringResource(R.string.playlist_pick_title)) },
         text = {
             val done = added
@@ -88,12 +83,22 @@ fun AddToPlaylistDialog(track: Track, onDismiss: () -> Unit, viewModel: Playlist
             }
         },
         confirmButton = {
-            if (added != null) TextButton(onDismiss, Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.playlist_done)) }
+            if (added != null) TextButton(dismiss, Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.playlist_done)) }
         },
         dismissButton = {
-            if (added == null) TextButton(onDismiss, Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.playlist_name_cancel)) }
+            if (added == null) TextButton(dismiss, Modifier.heightIn(min = 48.dp)) { Text(stringResource(R.string.playlist_name_cancel)) }
         },
     )
+}
+
+/** What the dialog shows after an add. */
+internal data class PickerState(val added: String?, val failed: Boolean) {
+    /** The state after [outcome], or null when nothing changed (Busy: another add is running, so the typed name must stay on screen). */
+    fun after(outcome: PlaylistPickerViewModel.Outcome, name: String): PickerState? = when (outcome) {
+        is PlaylistPickerViewModel.Outcome.Added -> PickerState(name, failed = false)
+        PlaylistPickerViewModel.Outcome.Busy -> null
+        PlaylistPickerViewModel.Outcome.BlankName -> copy(failed = true)
+    }
 }
 
 @Composable

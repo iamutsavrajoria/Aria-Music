@@ -35,7 +35,7 @@ fun AriaNavHost(
     onboarding: @Composable (onDone: () -> Unit) -> Unit = { done -> OnboardingScreen(done) },
 ) {
     NavHost(nav, startDestination = start, modifier = modifier) {
-        composable<OnboardingRoute> { onboarding { nav.navigate(HomeRoute) { popUpTo<OnboardingRoute> { inclusive = true } } } }
+        composable<OnboardingRoute> { onboarding { nav.navigate(HomeRoute) { launchSingleTop = true; popUpTo<OnboardingRoute> { inclusive = true } } } }
         composable<HomeRoute> {
             home(
                 { nav.navigate(AlbumRoute(it)) { launchSingleTop = true } },
