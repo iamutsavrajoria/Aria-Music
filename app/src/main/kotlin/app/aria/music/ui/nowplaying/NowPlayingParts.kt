@@ -130,7 +130,8 @@ internal fun SeekBar(positionMs: () -> Long, durationMs: Long, onSeek: (Long) ->
             onValueChange = { drag = it },
             onValueChangeFinished = { drag?.let { onSeek((it * duration).toLong().coerceIn(0L, duration)) }; drag = null },
             enabled = durationMs > 0,
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag(TAG_NP_SEEK).semantics { stateDescription = desc },
+            // The semantics node sits outside the sizing so its bounds are the 48dp target (the slider itself measures 44dp) and it merges the slider into one node.
+            modifier = Modifier.testTag(TAG_NP_SEEK).semantics(mergeDescendants = true) { stateDescription = desc }.fillMaxWidth().heightIn(min = 48.dp),
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(Formatters.duration(shownMs), style = MaterialTheme.typography.labelMedium)
